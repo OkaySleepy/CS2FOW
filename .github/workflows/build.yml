@@ -9,6 +9,7 @@ env:
   MMS_DIR: metamod-source-a5f4cca5824c0c5f13e8fa100dd15df164d2db22
   MMS_COMMIT: a5f4cca5824c0c5f13e8fa100dd15df164d2db22
   HL2SDK_COMMIT: 9ab16fa9fcdeeb30565dfdbf6fbb312356978a0b
+  AMBUILD_REF: "2.2"
   VRF_VERSION: "19.2"
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
           arch: x64
 
       - name: Install AMBuild
-        run: python -m pip install ambuild2
+        run: python -m pip install git+https://github.com/alliedmodders/ambuild.git@${{ env.AMBUILD_REF }}
 
       - name: Fetch build references
         shell: pwsh
@@ -84,7 +85,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++ unzip
-          python -m pip install ambuild2
+          python -m pip install git+https://github.com/alliedmodders/ambuild.git@${AMBUILD_REF}
 
       - name: Fetch build references
         run: |
