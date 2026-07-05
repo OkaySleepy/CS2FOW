@@ -1,0 +1,126 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  MMS_DIR: metamod-source-a5f4cca5824c0c5f13e8fa100dd15df164d2db22
+  MMS_COMMIT: a5f4cca5824c0c5f13e8fa100dd15df164d2db22
+  HL2SDK_COMMIT: 9ab16fa9fcdeeb30565dfdbf6fbb312356978a0b
+  VRF_VERSION: "19.2"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install AMBuild
+        run: python -m pip install ambuild
+
+      - name: Fetch build references
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ..\references | Out-Null
+          git clone https://github.com/alliedmodders/metamod-source.git ..\references\${{ env.MMS_DIR }}
+          git -C ..\references\${{ env.MMS_DIR }} checkout ${{ env.MMS_COMMIT }}
+          git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ..\references\hl2sdk-cs2
+          git -C ..\references\hl2sdk-cs2 checkout ${{ env.HL2SDK_COMMIT }}
+
+      - name: Download VRF CLI
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\vrf.zip"
+          $tmp = "$env:RUNNER_TEMP\vrf"
+          Invoke-WebRequest "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${{ env.VRF_VERSION }}/cli-windows-x64.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath $tmp
+          $cli = Get-ChildItem $tmp -Recurse -Filter Source2Viewer-CLI.exe | Select-Object -First 1
+          if ($null -eq $cli) { throw "Source2Viewer-CLI.exe not found" }
+          New-Item -ItemType Directory -Force tools\vrf\win64 | Out-Null
+          Copy-Item "$($cli.Directory.FullName)\*" tools\vrf\win64 -Recurse -Force
+
+      - name: Build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          Push-Location build
+          python ..\configure.py
+          ambuild
+          Pop-Location
+
+      - name: Test
+        run: .\build\cs2fow_tests\windows-x86_64\cs2fow_tests.exe
+
+      - name: Package
+        run: python package.py windows-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cs2fow-windows-x86_64
+          path: |
+            packages/cs2fow-0.1.0-preview-windows-x86_64.zip
+            packages/SHA256SUMS.txt
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ unzip
+          python -m pip install ambuild
+
+      - name: Fetch build references
+        run: |
+          mkdir -p ../references
+          git clone https://github.com/alliedmodders/metamod-source.git ../references/${MMS_DIR}
+          git -C ../references/${MMS_DIR} checkout ${MMS_COMMIT}
+          git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ../references/hl2sdk-cs2
+          git -C ../references/hl2sdk-cs2 checkout ${HL2SDK_COMMIT}
+
+      - name: Download VRF CLI
+        run: |
+          tmp="$(mktemp -d)"
+          curl -L "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${VRF_VERSION}/cli-linux-x64.zip" -o "$tmp/vrf.zip"
+          unzip -q "$tmp/vrf.zip" -d "$tmp/vrf"
+          cli="$(find "$tmp/vrf" -type f -name Source2Viewer-CLI | head -n 1)"
+          test -n "$cli"
+          mkdir -p tools/vrf/linux64
+          cp -a "$(dirname "$cli")/." tools/vrf/linux64/
+          chmod +x tools/vrf/linux64/Source2Viewer-CLI
+
+      - name: Build
+        run: |
+          mkdir -p build-linux
+          cd build-linux
+          python ../configure.py
+          ambuild
+
+      - name: Test
+        run: ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
+
+      - name: Package
+        run: python package.py linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cs2fow-linux-x86_64
+          path: |
+            packages/cs2fow-0.1.0-preview-linux-x86_64.zip
+            packages/SHA256SUMS.txt
