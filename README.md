@@ -15,7 +15,7 @@ baked BVH visibility data, and fast AVX runtime checks.
 
 </div>
 
-<table>
+<table width="100%">
 <tr>
 <td align="center" width="25%"><b>🚀 Version</b><br><code>0.1.0-preview</code></td>
 <td align="center" width="25%"><b>🧩 Plugin</b><br>Metamod</td>
@@ -68,7 +68,7 @@ In a 12v12 worst-case test, the old trace-based approach could hit around
 
 ## Quickstart
 
-<table>
+<table width="100%">
 <tr>
 <td width="33%"><b>1. Pick your core package</b><br><br>
 Windows:<br>
