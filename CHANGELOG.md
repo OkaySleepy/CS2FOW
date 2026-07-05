@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1-preview
+
+- Hardened CheckTransmit against invalid indexes, stale player state, and stale weapon handles.
+- Built Linux packages against SteamRT3 Sniper for CS2 server compatibility.
+- Added CI checks for glibc, libstdc++, and C++ ABI requirements.
+
 ## 0.1.0-preview
 
 First public preview of CS2FOW.

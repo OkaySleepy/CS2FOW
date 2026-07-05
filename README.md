@@ -74,9 +74,9 @@ In a 12v12 worst-case test, the old trace-based approach could hit around
 <tr>
 <td width="33%"><b>1. Pick your core package</b><br><br>
 Windows:<br>
-<code>cs2fow-0.1.0-preview-windows-x86_64.zip</code><br><br>
+<code>cs2fow-0.1.1-preview-windows-x86_64.zip</code><br><br>
 Linux:<br>
-<code>cs2fow-0.1.0-preview-linux-x86_64.zip</code>
+<code>cs2fow-0.1.1-preview-linux-x86_64.zip</code>
 </td>
 <td width="33%"><b>2. Extract into CS2</b><br><br>
 Extract the package into your server's:<br><br>
@@ -94,7 +94,7 @@ Download from the latest release:
 
 https://github.com/karola3vax/CS2FOW/releases/latest
 
-Optional official map prebakes are also available:
+The optional official map prebakes from `v0.1.0-preview` remain compatible:
 
 ```text
 cs2fow-0.1.0-preview-official-maps.zip
