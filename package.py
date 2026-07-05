@@ -74,6 +74,8 @@ def build_core_package(platform: str, plugin_name: str, baker_name: str, vrf_dir
   out = package_root(f"cs2fow-{VERSION}-{platform}")
   copy_common_files(out)
   copy_tree(ROOT / "tools" / "vrf" / vrf_dir, out / "tools" / "vrf" / vrf_dir)
+  if vrf_dir == "linux64":
+    (out / "tools" / "vrf" / "linux64" / "libTinyEXRNative.so").unlink(missing_ok=True)
   copy_file(ROOT / plugin_name, out / "addons" / "cs2fow" / "bin" / Path(plugin_name).name)
   copy_file(ROOT / baker_name, out / "tools" / Path(baker_name).name)
   write_text(

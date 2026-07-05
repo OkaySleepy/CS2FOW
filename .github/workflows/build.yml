@@ -105,6 +105,7 @@ jobs:
           test -n "$cli"
           mkdir -p tools/vrf/linux64
           cp -a "$(dirname "$cli")/." tools/vrf/linux64/
+          rm -f tools/vrf/linux64/libTinyEXRNative.so
           chmod +x tools/vrf/linux64/Source2Viewer-CLI
 
       - name: Build
