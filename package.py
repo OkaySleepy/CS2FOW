@@ -25,7 +25,8 @@ def copy_tree(source: Path, target: Path) -> None:
 
 def write_text(path: Path, text: str) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
-  path.write_text(text, encoding="utf-8", newline="\n")
+  with path.open("w", encoding="utf-8", newline="\n") as stream:
+    stream.write(text)
 
 
 def set_zip_modes(zip_path: Path, modes: dict[str, int]) -> None:
