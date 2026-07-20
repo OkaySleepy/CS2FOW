@@ -43,9 +43,8 @@ inline constexpr uint32_t k_max_module_rva = 512u * 1024u * 1024u;
 inline constexpr uint8_t k_life_alive = 0;
 inline constexpr uint8_t k_team_t = 2;
 inline constexpr uint8_t k_team_ct = 3;
-inline constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(3000);
+inline constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(1000);
 inline constexpr auto k_hidden_entity_quarantine = std::chrono::milliseconds(3000);
-inline constexpr auto k_pair_baseline_warmup = std::chrono::milliseconds(1500);
 static_assert(MAX_EDICTS == 16384);
 
 class game_resource_service
@@ -64,7 +63,9 @@ struct schema_offsets
 	uint32_t body_component {};
 	uint32_t scene_node {};
 	uint32_t abs_origin {};
-	uint32_t abs_velocity {};
+	uint32_t movement_services {};
+	uint32_t movement_buttons {};
+	uint32_t button_states {};
 	uint32_t view_offset {};
 	uint32_t view_x {};
 	uint32_t view_y {};
@@ -115,6 +116,14 @@ struct target_transmit_cache
 	visual_entity_group group;
 	visual_group_key group_key;
 	bool group_valid {};
+};
+
+struct player_bone_cache
+{
+	CEntityInstance *pawn {};
+	std::array<int32_t, k_visibility_body_point_count> indices {};
+	std::chrono::steady_clock::time_point retry_after {};
+	bool valid {};
 };
 
 enum class hide_reason : uint8_t
@@ -189,6 +198,7 @@ public:
 private:
 	bool read_gamedata(std::string &error);
 	bool verify_server_binary(std::string &error);
+	bool resolve_bone_functions(std::string &error);
 	bool resolve_schema(std::string &error);
 	bool resolve_map_source(const std::string &map, map_source &source, std::string &error) const;
 	bool load_map_bake(const std::filesystem::path &path, const std::string &map, const map_source &source,
@@ -213,14 +223,18 @@ private:
 	void record_hidden_entity(CGameEntitySystem *system, size_t member_index, int edict, const visual_entity_group &group,
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	bool capture(visibility_snapshot &value, float game_time);
+	bool capture_animated_body_points(CEntityInstance *pawn, uint32_t slot, player_state &player,
+		std::chrono::steady_clock::time_point now);
 	bool capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
 		bool overflow, float game_time, visibility_snapshot &value);
+	bool teammates_are_enemies() const;
 
 	ISmmAPI *api_ {};
 	IServerGameDLL *server_ {};
 	ISource2GameEntities *game_entities_ {};
 	IVEngineServer2 *engine_ {};
 	ICvar *cvar_ {};
+	ConVarRef teammates_are_enemies_;
 	ISchemaSystem *schema_ {};
 	IFileSystem *filesystem_ {};
 	IGameEventManager2 *game_events_ {};
@@ -229,6 +243,8 @@ private:
 	uint32_t recipient_slot_offset_ {};
 	uint32_t entity_system_offset_ {};
 	uint32_t game_event_manager_vtable_rva_ {};
+	uint32_t lookup_bone_rva_ {};
+	uint32_t get_bone_transform_rva_ {};
 	uint32_t server_binary_size_ {};
 	uint32_t server_binary_crc32_ {};
 	checktransmit_private_offsets transmit_offsets_;
@@ -246,15 +262,21 @@ private:
 	bool smoke_schema_available_ {};
 	bool smoke_gamedata_available_ {};
 	bool he_event_available_ {};
+	void *lookup_bone_ {};
+	void *get_bone_transform_ {};
 	he_clearance_history he_clearance_history_;
 	recent_hide_log recent_hides_;
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
 	std::array<target_transmit_cache, k_max_players> transmit_target_cache_;
+	std::array<player_bone_cache, k_max_players> player_bone_cache_;
 	mutable std::mutex transmit_state_mutex_;
 	runtime_timing_stats capture_timing_;
+	runtime_timing_stats bone_timing_;
 	runtime_timing_stats transmit_timing_;
+	uint32_t animated_players_ {};
+	uint32_t static_fallback_players_ {};
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
@@ -267,10 +289,6 @@ extern CConVar<float> cs2fow_he_clear_radius_units;
 extern CConVar<float> cs2fow_he_clear_seconds;
 extern CConVar<bool> cs2fow_filter_teammates;
 extern CConVar<int> cs2fow_update_interval_ms;
-extern CConVar<int> cs2fow_base_lookahead_ms;
-extern CConVar<float> cs2fow_rtt_lookahead_scale;
-extern CConVar<int> cs2fow_max_lookahead_ms;
-extern CConVar<float> cs2fow_max_prediction_units;
 extern CConVar<float> cs2fow_shoulder_base_units;
 extern CConVar<float> cs2fow_shoulder_rtt_scale;
 extern CConVar<float> cs2fow_max_shoulder_units;

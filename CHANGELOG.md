@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Made all fifteen tuned body samples follow each player's current animation. If CS2 cannot provide a safe pose, visibility falls back to the existing fixed samples.
+- Added a separate `bones` line to `cs2fow_status` for the game-thread cost of capturing animated body points and the current animated/fallback player counts.
+
+## 0.2.4-preview
+
+- Rebuilt against the current Metamod:Source and HL2SDK so CS2FOW commands and settings register correctly after the July 17 CS2 tooling update.
+- Tightened the upper eye origin from 24 to 16 units and changed ping preload to a 48-128 unit table: every 25 ms adds 10 units until the 200 ms cap. AABB side/top padding remains 8 units.
+- Automatically treat every other living player as an enemy when `mp_teammates_are_enemies 1` is active.
+- Reduced the lifecycle fail-open window from 3 seconds to 1 second and removed the separate 1.5-second visual warmup while preserving the complete-group baseline check.
+- Updated Visibility Studio with a second SAS model 256 units away and the same stationary origins, target samples, and ray count used by the runtime.
+- Replaced velocity/lookahead prediction with a ping-scaled W/S/diagonal intention origin, added a permanent feet origin, and reduced rays by 37.5% to 62.5% per player pair (from 192-384 to 120-144).
+
+## 0.2.3-preview
+
+- Verified that CS2 build `24248951` keeps the same private runtime layout and updated the strict Windows/Linux server fingerprints.
+- Rebaked `cs_shelter`, `de_boulder`, `de_eldorado`, and `de_fachwerk` after their mounted map sources changed in the same update.
+
 ## 0.2.2-preview
 
 - Verified the private runtime layout and updated the strict Windows/Linux fingerprints for CS2 build `24209309`.

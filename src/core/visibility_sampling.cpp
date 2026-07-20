@@ -1,7 +1,7 @@
 #include "visibility_sampling.h"
 
-// Builds current/predicted eye, body, axis-aligned box, and weapon-muzzle points
-// from copied player numbers. Movement prediction stops at baked walls; all
+// Builds current eye/input origins plus body, axis-aligned box, and weapon-muzzle
+// points from copied player numbers. Input origins stop at baked walls; all
 // returned counts remain inside fixed arrays used by the worker.
 
 #include <algorithm>
@@ -12,12 +12,10 @@ namespace cs2fow
 namespace
 {
 
-constexpr float k_max_prediction_speed = 350.0f;
-constexpr float k_prediction_ramp_start_speed = 75.0f;
-constexpr float k_prediction_ramp_full_speed = 100.0f;
 constexpr float k_horizontal_bounds_padding = 8.0f;
 constexpr float k_top_bounds_padding = 8.0f;
-constexpr float k_vertical_origin_offset = 24.0f;
+constexpr float k_vertical_origin_offset = 16.0f;
+constexpr float k_ping_step_ms = 25.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
 constexpr uint32_t k_wall_clip_steps = 8;
 constexpr float k_degrees_to_radians = 0.017453292519943295769f;
@@ -30,7 +28,7 @@ struct body_point
 	vec3 local;
 };
 
-constexpr std::array<body_point, 15> k_body_points {{
+constexpr std::array<body_point, k_visibility_body_point_count> k_body_points {{
 	{{5.609201635493794f, -1.4428278502142438f, 64.2012733036622f}},
 	{{2.0125293444485384f, 2.7306012182339385f, 59.938710028873956f}},
 	{{0.0f, 3.6606043089445834f, 54.0f}},
@@ -95,15 +93,6 @@ bounds player_bounds(const visibility_player &player, vec3 origin)
 	};
 }
 
-vec3 center(bounds value)
-{
-	return {
-		(value.min.x + value.max.x) * 0.5f,
-		(value.min.y + value.max.y) * 0.5f,
-		(value.min.z + value.max.z) * 0.5f
-	};
-}
-
 vec3 safe_origin(const bvh8_data &data, vec3 eye, vec3 candidate)
 {
 	if (distance_sq(eye, candidate) <= k_same_point_epsilon_sq)
@@ -148,6 +137,21 @@ void add_point(visibility_target_points &targets, vec3 point)
 	}
 }
 
+void add_origin(visibility_origin_points &origins, vec3 point)
+{
+	for (uint32_t index = 0; index < origins.count; ++index)
+	{
+		if (distance_sq(origins.points[index], point) <= k_same_point_epsilon_sq)
+		{
+			return;
+		}
+	}
+	if (origins.count < origins.points.size())
+	{
+		origins.points[origins.count++] = point;
+	}
+}
+
 void add_aabb_corners(visibility_target_points &targets, bounds box)
 {
 	add_point(targets, {box.min.x, box.min.y, box.min.z});
@@ -162,6 +166,14 @@ void add_aabb_corners(visibility_target_points &targets, bounds box)
 
 void add_body_points(visibility_target_points &targets, const visibility_player &player, vec3 origin)
 {
+	if (player.body_point_count == player.body_points.size())
+	{
+		for (vec3 point : player.body_points)
+		{
+			add_point(targets, point);
+		}
+		return;
+	}
 	for (const body_point &point : k_body_points)
 	{
 		add_point(targets, local_to_world(player, origin, point.local));
@@ -180,43 +192,62 @@ void add_muzzle_point(visibility_target_points &targets, const visibility_player
 
 } // namespace
 
-float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility_tuning &tuning)
+const std::array<visibility_body_binding, k_visibility_body_point_count> k_visibility_body_bindings {{
+	{"head_0", {-6.583533f, 6.974191f, -1.442826f}},
+	{"neck_0", {-3.579878f, 6.462899f, 2.730605f}},
+	{"spine_3", {-4.567842f, 3.748647f, 3.660606f}},
+	{"pelvis", {-4.824802f, -0.599556f, 5.946114f}},
+	{"arm_upper_L", {0.424835f, 9.730416f, -3.004129f}},
+	{"arm_upper_R", {0.987906f, 1.396868f, 0.034221f}},
+	{"leg_upper_L", {0.985176f, -6.111486f, 7.523203f}},
+	{"leg_upper_R", {-1.085612f, -1.173614f, -1.729821f}},
+	{"leg_lower_L", {-2.260681f, -12.971139f, -1.848936f}},
+	{"leg_lower_R", {0.532510f, -2.178953f, -2.248215f}},
+	{"ankle_L", {14.535840f, 7.542427f, -2.333007f}},
+	{"ankle_R", {6.831867f, 4.143797f, 2.375296f}},
+	{"arm_lower_R", {-0.079149f, -5.299527f, -3.384076f}},
+	{"arm_lower_L", {2.545455f, 22.522351f, 3.338776f}},
+	{"spine_2", {-5.793778f, -0.510446f, 4.308481f}}
+}};
+
+bool visibility_transform_body_point(const visibility_bone_transform &transform, vec3 local, vec3 &world)
 {
-	if (tuning.max_lookahead_ms == 0)
+	const float x = transform.rotation[0];
+	const float y = transform.rotation[1];
+	const float z = transform.rotation[2];
+	const float w = transform.rotation[3];
+	const float norm = x * x + y * y + z * z + w * w;
+	if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y)
+		|| !std::isfinite(transform.position.z) || !std::isfinite(norm) || norm < 0.25f || norm > 4.0f)
 	{
-		return 0.0f;
+		return false;
 	}
-	const float rtt_ms = std::max(0.0f, rtt_seconds) * 1000.0f;
-	const float wanted_ms = static_cast<float>(tuning.base_lookahead_ms)
-		+ rtt_ms * std::max(0.0f, tuning.rtt_lookahead_scale);
-	return std::clamp(wanted_ms, 0.0f, static_cast<float>(tuning.max_lookahead_ms)) / 1000.0f;
+	const float inverse_length = 1.0f / std::sqrt(norm);
+	const float qx = x * inverse_length;
+	const float qy = y * inverse_length;
+	const float qz = z * inverse_length;
+	const float qw = w * inverse_length;
+	const vec3 twice_cross {
+		2.0f * (qy * local.z - qz * local.y),
+		2.0f * (qz * local.x - qx * local.z),
+		2.0f * (qx * local.y - qy * local.x)
+	};
+	world = {
+		transform.position.x + local.x + qw * twice_cross.x + qy * twice_cross.z - qz * twice_cross.y,
+		transform.position.y + local.y + qw * twice_cross.y + qz * twice_cross.x - qx * twice_cross.z,
+		transform.position.z + local.z + qw * twice_cross.z + qx * twice_cross.y - qy * twice_cross.x
+	};
+	return std::isfinite(world.x) && std::isfinite(world.y) && std::isfinite(world.z);
 }
 
 float visibility_shoulder_offset_units(float rtt_seconds, const visibility_tuning &tuning)
 {
 	const float base = std::max(0.0f, tuning.shoulder_base_units);
 	const float maximum = std::max(base, tuning.max_shoulder_units);
-	const float wanted = std::max(0.0f, rtt_seconds) * 1000.0f * std::max(0.0f, tuning.shoulder_rtt_scale);
+	const float rtt_ms = std::max(0.0f, rtt_seconds) * 1000.0f;
+	const float stepped_ms = std::floor(rtt_ms / k_ping_step_ms) * k_ping_step_ms;
+	const float wanted = base + stepped_ms * std::max(0.0f, tuning.shoulder_rtt_scale);
 	return std::clamp(wanted, base, maximum);
-}
-
-vec3 visibility_prediction_offset(vec3 velocity, float seconds, float max_prediction_units)
-{
-	if (seconds <= 0.0f || max_prediction_units <= 0.0f)
-	{
-		return {};
-	}
-	const float speed = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-	if (speed <= k_prediction_ramp_start_speed)
-	{
-		return {};
-	}
-	const float capped_speed = std::min(speed, k_max_prediction_speed);
-	const float activation = std::clamp((speed - k_prediction_ramp_start_speed)
-		/ (k_prediction_ramp_full_speed - k_prediction_ramp_start_speed), 0.0f, 1.0f);
-	const float distance = std::min(capped_speed * seconds * activation, max_prediction_units);
-	const float scale = distance / speed;
-	return {velocity.x * scale, velocity.y * scale, 0.0f};
 }
 
 vec3 visibility_clip_destination(const bvh8_data &data, vec3 origin, vec3 destination)
@@ -302,61 +333,45 @@ float weapon_muzzle_length(weapon_muzzle_class value)
 	}
 }
 
-std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player,
-	float lookahead_seconds, const visibility_tuning &tuning)
+visibility_origin_points visibility_origins(const bvh8_data &data, const visibility_player &player,
+	const visibility_tuning &tuning)
 {
-	const vec3 predicted = visibility_clip_destination(data, player.eye,
-		add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds, tuning.max_prediction_units)));
-	const vec3 shoulder = scale(eye_right(player.eye_yaw_degrees), visibility_shoulder_offset_units(player.rtt_seconds, tuning));
+	visibility_origin_points origins;
+	const float offset = visibility_shoulder_offset_units(player.rtt_seconds, tuning);
+	const vec3 forward = eye_forward(player.eye_yaw_degrees);
+	const vec3 right_axis = eye_right(player.eye_yaw_degrees);
+	const vec3 shoulder = scale(right_axis, offset);
 	const vec3 left = subtract(player.eye, shoulder);
 	const vec3 right = add(player.eye, shoulder);
-	const vec3 predicted_left = subtract(predicted, shoulder);
-	const vec3 predicted_right = add(predicted, shoulder);
 	const vec3 vertical {0.0f, 0.0f, k_vertical_origin_offset};
 	const vec3 up = add(player.eye, vertical);
-	const vec3 predicted_up = add(predicted, vertical);
-	return {
-		player.eye,
-		predicted,
-		safe_origin(data, player.eye, left),
-		safe_origin(data, player.eye, right),
-		safe_origin(data, predicted, predicted_left),
-		safe_origin(data, predicted, predicted_right),
-		safe_origin(data, player.eye, up),
-		safe_origin(data, predicted, predicted_up)
-	};
+	add_origin(origins, player.eye);
+	add_origin(origins, safe_origin(data, player.eye, left));
+	add_origin(origins, safe_origin(data, player.eye, right));
+	add_origin(origins, safe_origin(data, player.eye, up));
+	add_origin(origins, player.origin);
+
+	const float forward_input = static_cast<float>((player.movement_buttons & k_visibility_button_forward) != 0)
+		- static_cast<float>((player.movement_buttons & k_visibility_button_back) != 0);
+	const float side_input = static_cast<float>((player.movement_buttons & k_visibility_button_right) != 0)
+		- static_cast<float>((player.movement_buttons & k_visibility_button_left) != 0);
+	// Pure A/D already has the matching ping-scaled shoulder origin.
+	if (forward_input != 0.0f)
+	{
+		vec3 direction = add(scale(forward, forward_input), scale(right_axis, side_input));
+		const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+		direction = scale(direction, offset / length);
+		add_origin(origins, visibility_clip_destination(data, player.eye, add(player.eye, direction)));
+	}
+	return origins;
 }
 
-visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player,
-	float lookahead_seconds, float max_prediction_units)
+visibility_target_points visibility_targets(const visibility_player &player)
 {
 	visibility_target_points targets;
-	const vec3 offset = visibility_prediction_offset(player.velocity, lookahead_seconds, max_prediction_units);
-	vec3 future_origin = player.origin;
-	if (distance_sq({}, offset) > k_same_point_epsilon_sq)
-	{
-		const vec3 current_center = center(player_bounds(player, player.origin));
-		const vec3 future_center = visibility_clip_destination(data, current_center, add(current_center, offset));
-		future_origin = add(player.origin, subtract(future_center, current_center));
-	}
-	const bool predicted = distance_sq(player.origin, future_origin) > k_same_point_epsilon_sq;
-
-	if (predicted)
-	{
-		add_aabb_corners(targets, player_bounds(player, player.origin));
-		add_aabb_corners(targets, player_bounds(player, future_origin));
-		add_body_points(targets, player, player.origin);
-		add_body_points(targets, player, future_origin);
-		add_muzzle_point(targets, player, player.origin);
-		add_muzzle_point(targets, player, future_origin);
-	}
-	else
-	{
-		add_aabb_corners(targets, player_bounds(player, player.origin));
-		add_body_points(targets, player, player.origin);
-		add_muzzle_point(targets, player, player.origin);
-	}
-
+	add_aabb_corners(targets, player_bounds(player, player.origin));
+	add_body_points(targets, player, player.origin);
+	add_muzzle_point(targets, player, player.origin);
 	return targets;
 }
 

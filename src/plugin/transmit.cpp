@@ -135,8 +135,12 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 		}
 	}
 	he_clearance_history_.clear();
+	player_bone_cache_.fill({});
 	capture_timing_ = {};
+	bone_timing_ = {};
 	transmit_timing_ = {};
+	animated_players_ = 0;
+	static_fallback_players_ = 0;
 	if (clear_debug_records)
 	{
 		recent_hides_.clear();
@@ -175,7 +179,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			hidden_group_clear(group);
 		}
 	}
-	if (!result || !visibility_snapshot_fresh(result->captured, now, 0.0f))
+	if (!result || !visibility_snapshot_fresh(result->captured, now))
 	{
 		record_timing();
 		return;
@@ -228,7 +232,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		std::memcpy(&slot, reinterpret_cast<const char *>(info) + recipient_slot_offset_, sizeof(slot));
 		if (slot < 0 || slot >= static_cast<int>(k_max_players) || read_checktransmit_full_update(info, transmit_offsets_.full_update_offset)
 			|| !result->players[slot].valid
-			|| !visibility_snapshot_fresh(result->captured, now, result->recipient_lookahead_seconds[slot]))
+			|| !visibility_snapshot_fresh(result->captured, now))
 		{
 			continue;
 		}
@@ -255,22 +259,22 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			const bool full_group_marked = cache.group_valid && group_fully_marked(system, info->m_pTransmitEntity, cache.group);
 			if (cache.group_valid)
 			{
-				update_pair_visual_group(guard, cache.group_key, now, k_pair_baseline_warmup);
+				update_pair_visual_group(guard, cache.group_key);
 			}
 			if (result->visible[slot][target])
 			{
 				if (full_group_marked)
 				{
-					pair_note_open(guard, now, result->sequence);
+					pair_note_open(guard, result->sequence);
 					hidden_group_clear(stored_group);
 				}
 				continue;
 			}
-			if (!pair_allows_hiding(guard, now, result->sequence))
+			if (!pair_allows_hiding(guard, result->sequence))
 			{
 				if (full_group_marked)
 				{
-					pair_note_open(guard, now, result->sequence);
+					pair_note_open(guard, result->sequence);
 					hidden_group_clear(stored_group);
 				}
 				continue;
