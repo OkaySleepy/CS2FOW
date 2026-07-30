@@ -112,7 +112,7 @@ Doors, breakable objects, and moving props do not block CS2FOW yet. The baked ma
 <details>
 <summary><strong>How does it avoid enemies appearing too late around corners?</strong></summary>
 
-CS2FOW first tries a chest probe, eight padded corners around the player's collision box, and the muzzle of the held weapon. If those quick checks are blocked, it checks Valve's nineteen animated hitbox capsules as complete three-dimensional volumes. It looks from your eye, shoulders, above your eye, and feet; when you hold W or S, or move diagonally, one extra point follows that direction. The shoulder and movement points reach farther at higher ping, stop at baked walls, and a short visibility hold prevents one-tick flicker.
+CS2FOW first checks Valve's nineteen animated hitbox capsules as a complete three-dimensional body. If that full silhouette is blocked, eight padded corners around the player's collision box and the held-weapon muzzle provide forgiving fallbacks. It looks from your eye, shoulders, above your eye, and feet; when you hold W or S, or move diagonally, one extra point follows that direction. The shoulder and movement points reach farther at higher ping, stop at baked walls, and a short visibility hold prevents flicker.
 
 As soon as the background worker finds a clear view again, CS2FOW lets the player's next normal update through.
 
@@ -179,9 +179,9 @@ Live smoke can block those imaginary sight lines too. By default, an HE opens a 
 1. **Load the map:** CS2FOW finds the mounted VPK and the physics data inside it.
 2. **Bake the walls:** the baker turns thousands of collision triangles into a compact, quick-to-search map called a BVH8.
 3. **Take a picture:** on the game thread, CS2FOW asks CS2 for each player's current bones and safely copies Valve's nineteen animated hitbox capsules with the player's position, size, movement buttons, view direction, ping, and held weapon. This recent picture is the snapshot. If a complete trustworthy capsule pose is unavailable, that player is shown normally.
-4. **Try the quick checks:** after reusing any active reveal hold, the worker tries the chest, eight AABB corners padded 16 units sideways and 4 units upward, and the held-weapon muzzle.
-5. **Test the whole body:** only when every quick check is blocked, the worker compares the projected three-dimensional silhouette of all nineteen capsules with the baked walls and live smoke.
-6. **Choose visible or hidden:** any clear quick check or capsule sample shows the whole player. Missing input, sub-pixel uncertainty, or a spent time budget also shows the player rather than risking an incorrect hide.
+4. **Test the whole body:** after reusing any active reveal hold, the worker compares the projected three-dimensional silhouette of all nineteen capsules with the baked walls and live smoke.
+5. **Try the forgiving fallbacks:** only when the capsule silhouette is fully blocked, the worker tries eight AABB corners padded 16 units sideways and 4 units upward, then the held-weapon muzzle.
+6. **Choose visible or hidden:** any clear capsule area or fallback shows the whole player. Missing input, sub-pixel uncertainty, or a spent time budget also shows the player rather than risking an incorrect hide.
 7. **Control the outgoing update:** `CheckTransmit`, the server's outgoing entity list, first marks the verified `dont_transmit` bit and then removes the matching primary send bit for each hidden visual entity.
 
 The worker gets a copy of the numbers, never live CS2 objects. In other words, it reads a photograph instead of reaching back into the moving game.

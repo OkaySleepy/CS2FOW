@@ -104,8 +104,6 @@ struct visibility_result
 	uint32_t hidden_pairs {};
 	uint32_t sampled_pixels {};
 	uint32_t traced_rays {};
-	uint32_t visibility_probe_rays {};
-	uint32_t visibility_probe_hits {};
 	uint32_t hold_reuses {};
 	uint32_t visited_nodes {};
 	uint32_t rasterized_triangles {};
@@ -145,8 +143,6 @@ struct worker_stats
 	uint32_t hidden_pairs {};
 	uint32_t sampled_pixels {};
 	uint32_t traced_rays {};
-	uint32_t visibility_probe_rays {};
-	uint32_t visibility_probe_hits {};
 	uint32_t hold_reuses {};
 	uint32_t visited_nodes {};
 	uint32_t rasterized_triangles {};

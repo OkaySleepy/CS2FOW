@@ -14,7 +14,6 @@ namespace
 
 constexpr auto k_worker_budget = std::chrono::milliseconds(75);
 constexpr uint32_t k_worker_count_max = 4;
-constexpr uint32_t k_visibility_probe_capsule = 4; // chest
 
 struct job_totals
 {
@@ -24,8 +23,6 @@ struct job_totals
 	uint32_t hidden_pairs {};
 	uint32_t sampled_pixels {};
 	uint32_t traced_rays {};
-	uint32_t visibility_probe_rays {};
-	uint32_t visibility_probe_hits {};
 	uint32_t hold_reuses {};
 	uint32_t visited_nodes {};
 	uint32_t rasterized_triangles {};
@@ -42,13 +39,6 @@ struct job_totals
 	uint32_t cache_compaction_leaves_saved {};
 	uint32_t uncached_blocked {};
 };
-
-vec3 capsule_midpoint(const visibility_capsule &capsule)
-{
-	return {(capsule.start.x + capsule.end.x) * 0.5f,
-		(capsule.start.y + capsule.end.y) * 0.5f,
-		(capsule.start.z + capsule.end.z) * 0.5f};
-}
 
 } // namespace
 
@@ -335,43 +325,6 @@ void visibility_worker::process(job &current, uint32_t worker_index)
 			{
 				const vec3 &origin = ray_origins.points[origin_index];
 				uint32_t &cached_packet = cached_packets_[recipient][target][origin_index];
-				const vec3 probe = capsule_midpoint(to.capsules[k_visibility_probe_capsule]);
-				const ray_hit probe_hit = segment_blocked(*data_, origin, probe, cached_packet);
-				cached_packet = probe_hit.packet_index;
-				++totals.traced_rays;
-				++totals.visibility_probe_rays;
-				if (!probe_hit.blocked && (active_smokes == nullptr || !smoke_line_blocked(
-					*active_smokes, origin, probe, current.smoke_age_advance, data_)))
-				{
-					blocked = false;
-					++totals.visibility_probe_hits;
-				}
-				if (!blocked) break;
-				for (const vec3 &point : aabb_points)
-				{
-					const ray_hit hit = segment_blocked(*data_, origin, point, cached_packet);
-					cached_packet = hit.packet_index;
-					++totals.traced_rays;
-					if (!hit.blocked && (active_smokes == nullptr || !smoke_line_blocked(
-						*active_smokes, origin, point, current.smoke_age_advance, data_)))
-					{
-						blocked = false;
-						break;
-					}
-				}
-				if (!blocked) break;
-				if (has_muzzle)
-				{
-					const ray_hit hit = segment_blocked(*data_, origin, muzzle, cached_packet);
-					cached_packet = hit.packet_index;
-					++totals.traced_rays;
-					if (!hit.blocked && (active_smokes == nullptr || !smoke_line_blocked(
-						*active_smokes, origin, muzzle, current.smoke_age_advance, data_)))
-					{
-						blocked = false;
-					}
-				}
-				if (!blocked) break;
 				capsule_occluder_cache &cached_occluders = cached_occluders_[recipient][target][origin_index];
 				capsule_query_stats query_stats;
 				const capsule_query_result capsule_result = capsule_visible_from_origin(*data_, origin,
@@ -405,6 +358,31 @@ void visibility_worker::process(job &current, uint32_t worker_index)
 					}
 					break;
 				}
+				for (const vec3 &point : aabb_points)
+				{
+					const ray_hit hit = segment_blocked(*data_, origin, point, cached_packet);
+					cached_packet = hit.packet_index;
+					++totals.traced_rays;
+					if (!hit.blocked && (active_smokes == nullptr || !smoke_line_blocked(
+						*active_smokes, origin, point, current.smoke_age_advance, data_)))
+					{
+						blocked = false;
+						break;
+					}
+				}
+				if (!blocked) break;
+				if (has_muzzle)
+				{
+					const ray_hit hit = segment_blocked(*data_, origin, muzzle, cached_packet);
+					cached_packet = hit.packet_index;
+					++totals.traced_rays;
+					if (!hit.blocked && (active_smokes == nullptr || !smoke_line_blocked(
+						*active_smokes, origin, muzzle, current.smoke_age_advance, data_)))
+					{
+						blocked = false;
+					}
+				}
+				if (!blocked) break;
 			}
 			const auto now = std::chrono::steady_clock::now();
 			if (!blocked)
@@ -436,8 +414,6 @@ void visibility_worker::publish(job &current)
 		result.hidden_pairs += totals.hidden_pairs;
 		result.sampled_pixels += totals.sampled_pixels;
 		result.traced_rays += totals.traced_rays;
-		result.visibility_probe_rays += totals.visibility_probe_rays;
-		result.visibility_probe_hits += totals.visibility_probe_hits;
 		result.hold_reuses += totals.hold_reuses;
 		result.visited_nodes += totals.visited_nodes;
 		result.rasterized_triangles += totals.rasterized_triangles;
@@ -471,8 +447,6 @@ void visibility_worker::publish(job &current)
 		stats_.hidden_pairs = result.hidden_pairs;
 		stats_.sampled_pixels = result.sampled_pixels;
 		stats_.traced_rays = result.traced_rays;
-		stats_.visibility_probe_rays = result.visibility_probe_rays;
-		stats_.visibility_probe_hits = result.visibility_probe_hits;
 		stats_.hold_reuses = result.hold_reuses;
 		stats_.visited_nodes = result.visited_nodes;
 		stats_.rasterized_triangles = result.rasterized_triangles;

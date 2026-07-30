@@ -11,7 +11,7 @@ The Studio shows:
 - direct BVH8 map loading, collision walls, viewing origins, and actual debug rays; and
 - a 64 Hz first-person range with movement, navigation, weapons, smoke, HE clearing, sounds, and Runtime LOS/Debug views.
 
-The raw LOS order is reveal-hold reuse, chest probe, eight padded AABB corners, muzzle, then the nineteen-capsule silhouette. The capsule stage uses the same compact front-to-back occluder proofs, target-fitted 32-by-32 depth view, smoke tests, and 75 ms fail-open budget as runtime. The plugin uses Intel MaskedOcclusionCulling while Studio uses a scalar JavaScript rasterizer with matching constants and conservative boundaries, so edge pixels are representative rather than guaranteed bit-identical.
+The raw LOS order is reveal-hold reuse, the nineteen-capsule silhouette, eight padded AABB corners, then muzzle. The capsule stage uses the same compact front-to-back occluder proofs, target-fitted 32-by-32 depth view, smoke tests, and 75 ms fail-open budget as runtime. The plugin uses Intel MaskedOcclusionCulling while Studio uses a scalar JavaScript rasterizer with matching constants and conservative boundaries, so edge pixels are representative rather than guaranteed bit-identical.
 
 Required model bones or capsule bindings are never replaced with invented points. If capture is incomplete, Studio reports that runtime capture is unavailable and would fail open. Reduced-motion preference freezes a valid real capsule pose.
 
@@ -50,4 +50,4 @@ node tools/visibility_point_editor/check_bvh8.mjs
 node tools/visibility_point_editor/check_fps.mjs
 ```
 
-The runtime-alignment check compares capsule bindings, AABB padding, probe order, muzzle lengths, viewing origins, defaults, reveal hold, smoke/HE behavior, and fail-open cases against the native source.
+The runtime-alignment check compares capsule bindings, AABB padding, LOS order, muzzle lengths, viewing origins, defaults, reveal hold, smoke/HE behavior, and fail-open cases against the native source.

@@ -610,7 +610,7 @@ void test_visibility_worker()
 	value.smoke_available = false;
 	worker->submit(value, 0, tuning);
 	result = wait_for(10);
-	assert(result && result->visible[0][1] && result->visibility_probe_hits != 0);
+	assert(result && result->visible[0][1]);
 	smokes->he_clear_radius_units = 100.0f;
 	smokes->he_clear_seconds = 3.0f;
 	smokes->he_clearance_count = 1;
@@ -970,7 +970,6 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 			assert(worker->start(&data, thread_count));
 			std::array<double, 20> dm_timings {};
 			double dm_active = 0.0;
-			uint64_t dm_probe_hits = 0;
 			uint64_t dm_cache_hits = 0;
 			uint64_t dm_cache_queries = 0;
 			uint64_t dm_triangles = 0;
@@ -1015,7 +1014,6 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 					&& !result->budget_exhausted);
 				dm_timings[dm_frame] = result->worker_ms;
 				dm_active += result->worker_active_ms;
-				dm_probe_hits += result->visibility_probe_hits;
 				dm_cache_hits += result->occluder_cache_hits;
 				dm_cache_queries += result->occluder_cache_hits + result->occluder_cache_misses;
 				dm_triangles += result->rasterized_triangles;
@@ -1037,7 +1035,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 			dm_average /= dm_timings.size();
 			std::cout << label << ' ' << scenario << '-' << thread_count << "threads: wall_average=" << dm_average
 				<< "ms wall_p99=" << dm_timings.back() << "ms active_average=" << dm_active / dm_timings.size()
-				<< "ms pairs=" << expected_pairs << " probe_hits=" << dm_probe_hits / dm_timings.size()
+				<< "ms pairs=" << expected_pairs
 				<< " cache=" << dm_cache_hits / dm_timings.size() << '/' << dm_cache_queries / dm_timings.size()
 				<< " triangles=" << dm_triangles / dm_timings.size()
 				<< " draws=" << dm_draws / dm_timings.size() << " rects=" << dm_rects / dm_timings.size()

@@ -113,8 +113,8 @@ For each eligible living pair the worker:
 
 - makes five fixed recipient origins: eye, RTT-scaled left/right shoulders, eye plus 16 units, and feet;
 - adds one wall-clipped, RTT-scaled W/S or diagonal intention origin; pure A/D already uses the matching shoulder point;
-- reuses an active reveal hold, then tries the direct chest probe, eight AABB corners padded 16 units sideways and 4 units upward, and the held-weapon muzzle;
-- only when every cheap check is blocked, projects the complete nineteen-capsule body into a target-fitted 32 by 32 CPU depth view;
+- reuses an active reveal hold, then projects the complete nineteen-capsule body into a target-fitted 32 by 32 CPU depth view;
+- only when that silhouette is fully blocked, tries eight AABB corners padded 16 units sideways and 4 units upward, then the held-weapon muzzle;
 - proves fully covered capsule regions hidden in batches, tests remaining capsule surface samples against baked walls and copied live smoke, and stops at the first open sample;
 - lets an HE clear only smoke that already existed when the detonation was recorded on the same game clock;
 - reuses the triangle packet that blocked the same pair's earlier muzzle ray, then traverses the BVH8 if needed;

@@ -29,18 +29,14 @@ const nativeSmokeHeader = readFileSync(new URL("../../src/core/smoke_occlusion.h
 const studioViewer = readFileSync(new URL("./viewer.js", import.meta.url), "utf8");
 assert.match(nativeWorker, /k_worker_budget\s*=\s*std::chrono::milliseconds\(75\)/,
 	"Studio's shared deadline must be reviewed when the native worker budget changes");
-assert.match(nativeWorker, /k_visibility_probe_capsule\s*=\s*4/,
-	"Studio's chest probe must be reviewed when the native probe capsule changes");
 assert.match(nativeWorker, /pair_started < revealed_until_\[recipient\]\[target\]/,
 	"Studio's hold short-circuit must be reviewed when native hold reuse changes");
 const holdOrder = nativeWorker.indexOf("pair_started < revealed_until_");
-const chestOrder = nativeWorker.indexOf("capsule_midpoint(to.capsules[k_visibility_probe_capsule])");
+const capsuleOrder = nativeWorker.indexOf("capsule_visible_from_origin(*data_");
 const aabbOrder = nativeWorker.indexOf("for (const vec3 &point : aabb_points)");
 const muzzleOrder = nativeWorker.indexOf("if (has_muzzle)");
-const capsuleOrder = nativeWorker.indexOf("capsule_visible_from_origin(*data_");
-assert.ok(holdOrder < chestOrder && chestOrder < aabbOrder && aabbOrder < muzzleOrder
-	&& muzzleOrder < capsuleOrder,
-	"native runtime order must remain hold, chest, AABB, muzzle, capsules");
+assert.ok(holdOrder < capsuleOrder && capsuleOrder < aabbOrder && aabbOrder < muzzleOrder,
+	"native runtime order must remain hold, capsules, AABB, muzzle");
 assert.match(nativeCapsules, /k_capsule_occluder_cache_size\s*=\s*96/,
 	"Studio's proof cache must be reviewed when native capacity changes");
 assert.match(nativeSettings, /cs2fow_visibility_hold_ms[\s\S]{0,160}\b200, true, 0, true, 1000/,
@@ -187,15 +183,15 @@ const smokeResult = capsule_visible_from_origin(test_map(), capsuleOrigin, capsu
 assert.equal(smokeResult.result, "blocked", "smoke must test the exact geometry-clear capsule rays");
 assert.equal(smokeResult.reason, "smoke");
 
-const probeTarget = capsule_target({x: 100, y: 0, z: 0}, 0);
-const probeResult = trace_capsule_target(test_map(),
-	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}}, probeTarget,
+const capsulePriorityTarget = capsule_target({x: 100, y: 0, z: 0}, 0);
+const capsulePriorityResult = trace_capsule_target(test_map(),
+	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}}, capsulePriorityTarget,
 	{debug: true, targetOrigin: {x: 100, y: 0, z: 0}});
-assert.equal(probeResult.rawVisible, true, "the native chest probe must reveal a clear target before rasterization");
-assert.equal(probeResult.visibilityProbeRays, 1);
-assert.equal(probeResult.visibilityProbeHits, 1);
-assert.equal(probeResult.tracedRays, 1);
-assert.equal(probeResult.rays.length, 6, "Debug must draw the actual chest probe");
+assert.equal(capsulePriorityResult.rawVisible, true, "the full capsule silhouette must decide a clear target first");
+assert.equal(capsulePriorityResult.tracedRays, 0,
+	"clear capsules without smoke must not fall through to AABB or muzzle rays");
+assert.equal(capsulePriorityResult.rays.length, 0,
+	"debug must not invent a chest ray before the capsule decision");
 const muzzleFallbackMap = test_map(occludingWall);
 muzzleFallbackMap.segment_blocked = (_start, end) =>
 	({blocked: Math.abs(end.x - 64) > 0.001, packet: 0});
@@ -203,9 +199,9 @@ const muzzleFallback = trace_capsule_target(muzzleFallbackMap,
 	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}},
 	capsule_target({x: 100, y: 0, z: 0}, 36), {targetOrigin: {x: 100, y: 0, z: 0}});
 assert.equal(muzzleFallback.rawVisible, true,
-	"runtime order must reach the muzzle after the chest probe and all eight AABB corners are blocked");
-assert.equal(muzzleFallback.tracedRays, 10,
-	"the blocked chest probe, eight blocked AABB corners, and clear muzzle must all be counted");
+	"runtime order must reach the muzzle after capsules and all eight AABB corners are blocked");
+assert.equal(muzzleFallback.tracedRays, 9,
+	"the eight blocked AABB corners and clear muzzle must all be counted");
 const aabbFallbackMap = test_map(occludingWall);
 aabbFallbackMap.segment_blocked = (_start, end) =>
 	({blocked: Math.abs(end.x - 68) > 0.001, packet: 0});
@@ -213,8 +209,8 @@ const aabbFallback = trace_capsule_target(aabbFallbackMap,
 	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}},
 	capsule_target({x: 100, y: 0, z: 0}, 0), {targetOrigin: {x: 100, y: 0, z: 0}});
 assert.equal(aabbFallback.rawVisible, true,
-	"runtime order must test the eight padded AABB corners after capsule and muzzle failure");
-assert.equal(aabbFallback.tracedRays, 2, "the blocked chest probe and first clear AABB corner must be counted");
+	"runtime order must test the eight padded AABB corners after a blocked capsule silhouette");
+assert.equal(aabbFallback.tracedRays, 1, "the first clear AABB corner must be counted");
 
 assert.equal(FPS_DT, 1 / 64);
 assert.deepEqual(["pistol", "smg", "rifle", "sniper"].map(weapon_muzzle_length), [18, 28, 36, 52],
@@ -356,11 +352,11 @@ const animatedTargetSets = animatedTargetSimulation.bots.map((bot) => capsule_ta
 animatedTargetSimulation.set_targets(animatedTargetSets);
 for (let index = 0; index < animatedTargetSets.length; ++index)
 	assert.equal(animatedTargetSimulation.targetSets[index], animatedTargetSets[index], `bot ${index + 1} must use its animated capsule set`);
-const alignedMap = test_map();
-let alignedProbe = null;
+const alignedMap = test_map(occludingWall);
+let alignedPoint = null;
 alignedMap.segment_blocked = (_start, end) =>
 {
-	alignedProbe = end;
+	alignedPoint = end;
 	return {blocked: false, packet: 0xffffffff};
 };
 const alignedSimulation = new FpsSimulation(alignedMap, seededSettings);
@@ -370,8 +366,8 @@ alignedSimulation.bot.origin = {x: 200, y: 50, z: 10};
 alignedSimulation.bot.yaw = 90;
 alignedSimulation.set_targets([staleTarget]);
 alignedSimulation.visibility(alignedSimulation.bot, 0);
-assert.ok(Math.abs(alignedProbe.x - 200) < 0.001 && Math.abs(alignedProbe.y - 50) < 0.001,
-	"transferred capsules must be rigidly aligned to the worker's current actor pose");
+assert.ok(Math.abs(alignedPoint.x - 168) < 0.001 && Math.abs(alignedPoint.y - 18) < 0.001,
+	"transferred target data must stay aligned to the worker's current actor pose");
 simulation.set_targets(simulation.bots.map((bot) => capsule_target(bot.origin)));
 simulation.set_debug(true);
 simulation.set_input({w: true, a: true});
@@ -386,14 +382,13 @@ for (let left = 0; left < state.bots.length; ++left)
 			state.bots[left].origin.y - state.bots[right].origin.y) >= 1000,
 		"extra bot spawns should be separated by at least 1000 units");
 assert.equal(state.visibility.origins.length / 3, 6);
-assert.ok(state.visibilities.every((visibility) => visibility.sampledPixels === 0 && visibility.tracedRays === 1
-	&& visibility.visibilityProbeRays === 1 && visibility.visibilityProbeHits === 1),
-	"the no-smoke path must stop after the runtime's clear chest probe");
-assert.ok(state.visibilities.every((visibility) => visibility.rays.length === 6 && visibility.blocked.length === 1),
-	"debug output must contain the actual chest probe and no invented depth-buffer rays");
+assert.ok(state.visibilities.every((visibility) => visibility.sampledPixels === 0 && visibility.tracedRays === 0),
+	"the no-smoke path must stop after the runtime's clear capsule silhouette");
+assert.ok(state.visibilities.every((visibility) => visibility.rays.length === 0 && visibility.blocked.length === 0),
+	"debug output must not invent direct rays for the capsule-only decision");
 const heldVisibility = simulation.visibility(simulation.bot, 0);
 assert.equal(heldVisibility.held, true, "an active reveal hold must be reused before LOS work");
-assert.equal(heldVisibility.tracedRays, 0, "hold reuse must skip probe, capsule, and muzzle work like runtime");
+assert.equal(heldVisibility.tracedRays, 0, "hold reuse must skip capsule, AABB, and muzzle work like runtime");
 simulation.player.crouched = true;
 const crouchedVisibility = simulation.visibility(simulation.bot, 0);
 assert.ok(Math.abs(crouchedVisibility.origins[2] - (simulation.player.origin.z + 28.5)) < 0.001,

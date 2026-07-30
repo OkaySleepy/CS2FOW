@@ -57,13 +57,11 @@ def main() -> None:
 
     order = [
         worker.index("pair_started < revealed_until_"),
-        worker.index("capsule_midpoint(to.capsules[k_visibility_probe_capsule])"),
+        worker.index("capsule_visible_from_origin(*data_"),
         worker.index("for (const vec3 &point : aabb_points)"),
         worker.index("if (has_muzzle)"),
-        worker.index("capsule_visible_from_origin(*data_"),
     ]
     assert order == sorted(order)
-    assert "k_visibility_probe_capsule = 4" in worker
 
     for native, studio in ((18, "18"), (28, "28"), (36, "36"), (52, "52")):
         assert f"return {native}.0f" in sampling_cpp
@@ -99,6 +97,7 @@ def main() -> None:
     assert "DEFAULT_HE_SECONDS = 2.5" in fps
 
     assert "bool blocked = to.capsule_count == k_visibility_capsule_count" in worker
+    assert "k_visibility_probe_capsule" not in worker
     assert "let rawVisible = !valid" in fps and "let indeterminate = !valid" in fps
     assert "using static points" not in viewer
     assert "default_sas_visibility_points" not in viewer

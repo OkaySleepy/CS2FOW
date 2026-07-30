@@ -763,8 +763,7 @@ export function trace_capsule_target(map, viewer, targetSet, options = {})
 	origins.forEach((origin, index) => originValues.set([origin.x, origin.y, origin.z], index * 3));
 	const rays = [];
 	const blockedRays = [];
-	const stats = {sampledPixels: 0, tracedRays: 0, visitedNodes: 0, rasterizedTriangles: 0,
-		visibilityProbeRays: 0, visibilityProbeHits: 0};
+	const stats = {sampledPixels: 0, tracedRays: 0, visitedNodes: 0, rasterizedTriangles: 0};
 	const deadline = Number.isFinite(options.deadline) ? options.deadline : (globalThis.performance?.now?.() ?? Date.now()) + 75;
 	const valid = valid_target_set(targetSet, options.targetOrigin);
 	const muzzle = valid && targetSet.muzzle ? {x: targetSet.muzzle[0], y: targetSet.muzzle[1], z: targetSet.muzzle[2]} : null;
@@ -795,48 +794,6 @@ export function trace_capsule_target(map, viewer, targetSet, options = {})
 	for (let originIndex = 0; valid && !rawVisible && originIndex < origins.length; ++originIndex)
 	{
 		const origin = origins[originIndex];
-		const chest = 4 * 7;
-		const probe = {x: (targetSet.capsules[chest] + targetSet.capsules[chest + 3]) * 0.5,
-			y: (targetSet.capsules[chest + 1] + targetSet.capsules[chest + 4]) * 0.5,
-			z: (targetSet.capsules[chest + 2] + targetSet.capsules[chest + 5]) * 0.5};
-		const probeWall = map.segment_blocked(origin, probe, packets[originIndex], traversal);
-		packets[originIndex] = probeWall.packet;
-		++stats.tracedRays;
-		++stats.visibilityProbeRays;
-		const probeSmokeBlocked = !probeWall.blocked && Boolean(options.smokeBlocked?.(origin, probe));
-		wallBlocked ||= probeWall.blocked;
-		smokeBlocked ||= probeSmokeBlocked;
-		if (options.debug)
-		{
-			rays.push(origin.x, origin.y, origin.z, probe.x, probe.y, probe.z);
-			blockedRays.push(probeWall.blocked ? 1 : probeSmokeBlocked ? 2 : 0);
-		}
-		if (!probeWall.blocked && !probeSmokeBlocked)
-		{
-			rawVisible = true;
-			++stats.visibilityProbeHits;
-			break;
-		}
-		for (const point of fallbacks)
-		{
-			const wall = map.segment_blocked(origin, point, packets[originIndex], traversal);
-			packets[originIndex] = wall.packet;
-			++stats.tracedRays;
-			const fallbackSmokeBlocked = !wall.blocked && Boolean(options.smokeBlocked?.(origin, point));
-			wallBlocked ||= wall.blocked;
-			smokeBlocked ||= fallbackSmokeBlocked;
-			if (options.debug)
-			{
-				rays.push(origin.x, origin.y, origin.z, point.x, point.y, point.z);
-				blockedRays.push(wall.blocked ? 1 : fallbackSmokeBlocked ? 2 : 0);
-			}
-			if (!wall.blocked && !fallbackSmokeBlocked)
-			{
-				rawVisible = true;
-				break;
-			}
-		}
-		if (rawVisible) break;
 		const query = capsule_visible_from_origin(map, origin, targetSet.capsules, {
 			deadline,
 			traversal,
@@ -861,6 +818,25 @@ export function trace_capsule_target(map, viewer, targetSet, options = {})
 		}
 		wallBlocked ||= query.reason === "wall";
 		smokeBlocked ||= query.reason === "smoke";
+		for (const point of fallbacks)
+		{
+			const wall = map.segment_blocked(origin, point, packets[originIndex], traversal);
+			packets[originIndex] = wall.packet;
+			++stats.tracedRays;
+			const fallbackSmokeBlocked = !wall.blocked && Boolean(options.smokeBlocked?.(origin, point));
+			wallBlocked ||= wall.blocked;
+			smokeBlocked ||= fallbackSmokeBlocked;
+			if (options.debug)
+			{
+				rays.push(origin.x, origin.y, origin.z, point.x, point.y, point.z);
+				blockedRays.push(wall.blocked ? 1 : fallbackSmokeBlocked ? 2 : 0);
+			}
+			if (!wall.blocked && !fallbackSmokeBlocked)
+			{
+				rawVisible = true;
+				break;
+			}
+		}
 	}
 	const blocked = new Uint8Array(blockedRays);
 	return {

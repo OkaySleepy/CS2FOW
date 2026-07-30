@@ -933,10 +933,10 @@ void plugin::print_metrics() const
 	META_CONPRINTF("[CS2FOW] worker threads=%u wall=%.3fms active=%.3fms recent_p95=%.3fms recent_p99=%.3fms lifetime_average=%.3fms maximum=%.3fms snapshot_age=%.1fms\n",
 		stats.thread_count, stats.latest_ms, stats.latest_active_ms, stats.recent_p95_ms, stats.recent_p99_ms,
 		stats.average_ms, stats.maximum_ms, age_ms);
-	META_CONPRINTF("[CS2FOW] workload pairs=%u visible=%u hidden=%u hold=%u pixels=%u rays=%u probes=%u/%u nodes=%u triangles=%u cache=%u/%u budget=%llu cycles=%llu\n",
+	META_CONPRINTF("[CS2FOW] workload pairs=%u visible=%u hidden=%u hold=%u pixels=%u rays=%u nodes=%u triangles=%u cache=%u/%u budget=%llu cycles=%llu\n",
 		stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs, stats.hold_reuses,
 		stats.sampled_pixels, stats.traced_rays,
-		stats.visibility_probe_hits, stats.visibility_probe_rays, stats.visited_nodes, stats.rasterized_triangles,
+		stats.visited_nodes, stats.rasterized_triangles,
 		stats.occluder_cache_hits, stats.occluder_cache_hits + stats.occluder_cache_misses,
 		static_cast<unsigned long long>(stats.budget_exhaustions),
 		static_cast<unsigned long long>(stats.cycles));
