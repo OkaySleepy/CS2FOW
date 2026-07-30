@@ -1,6 +1,8 @@
 /build/
 /build-linux/
 /build-*/
+/.build-deps/
+/.playwright-cli/
 /packages/
 /__pycache__/
 /data/maps/*

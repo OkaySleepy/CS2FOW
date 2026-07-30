@@ -5,82 +5,21 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  MMS_COMMIT: 2667e8e5947237c4cb7ea45cec3913ad6a44757c
-  HL2SDK_COMMIT: 159cddd44cef4d9d607ef4ec4ac9f85cf056494c
-  AMBUILD_COMMIT: d89ec91a7ac2607da07b50bb62346f9a10e9a998
-  VRF_VERSION: "19.2"
-
 jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Fetch build references
+      - name: Build, test, verify, and package
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force ..\references | Out-Null
-          git init ..\references\ambuild
-          git -C ..\references\ambuild remote add origin https://github.com/alliedmodders/ambuild.git
-          git -C ..\references\ambuild fetch --depth 1 origin ${{ env.AMBUILD_COMMIT }}
-          git -C ..\references\ambuild checkout --detach FETCH_HEAD
-          git clone https://github.com/alliedmodders/metamod-source.git ..\references\metamod-source
-          git -C ..\references\metamod-source checkout ${{ env.MMS_COMMIT }}
-          git -C ..\references\metamod-source submodule update --init hl2sdk-manifests
-          git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ..\references\hl2sdk-cs2
-          git -C ..\references\hl2sdk-cs2 checkout ${{ env.HL2SDK_COMMIT }}
+        run: ./scripts/build-windows.ps1
 
-      - name: Download VRF CLI
-        shell: pwsh
-        run: |
-          $zip = "$env:RUNNER_TEMP\vrf.zip"
-          $tmp = "$env:RUNNER_TEMP\vrf"
-          Invoke-WebRequest "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${{ env.VRF_VERSION }}/cli-windows-x64.zip" -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne "53e7e8dac1ddd876078346de709c8dbe613a967e94cd0c969aa34c61ec07680d") { throw "VRF archive checksum mismatch" }
-          Expand-Archive $zip -DestinationPath $tmp
-          $cli = Get-ChildItem $tmp -Recurse -Filter Source2Viewer-CLI.exe | Select-Object -First 1
-          if ($null -eq $cli) { throw "Source2Viewer-CLI.exe not found" }
-          New-Item -ItemType Directory -Force tools\vrf\win64 | Out-Null
-          Copy-Item "$($cli.Directory.FullName)\*" tools\vrf\win64 -Recurse -Force
-
-      - name: Build
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH = (Resolve-Path ..\references\ambuild).Path
-          New-Item -ItemType Directory -Force build | Out-Null
-          Push-Location build
-          python ..\configure.py
-          python -c "from ambuild2.run import cli_run; cli_run()"
-          Pop-Location
-
-      - name: Test
-        run: .\build\cs2fow_tests\windows-x86_64\cs2fow_tests.exe
-
-      - name: Check visibility point editor
-        run: |
-          python tools/visibility_point_editor/check_points.py
-          python -m unittest -v tests/test_package.py
-          node --check tools/visibility_point_editor/capsule_visibility.js
-          node --check tools/visibility_point_editor/bvh8.js
-          node --check tools/visibility_point_editor/bvh8_worker.js
-          node --check tools/visibility_point_editor/fps_runtime.js
-          node --check tools/visibility_point_editor/viewer.js
-          node tools/visibility_point_editor/check_bvh8.mjs
-          node tools/visibility_point_editor/check_fps.mjs
-
-      - name: Package
-        run: python package.py windows-x86_64
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cs2fow-windows-x86_64
           path: |
@@ -92,101 +31,12 @@ jobs:
     container:
       image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk@sha256:2969e5a47146a6494c01d953cd818b1d62712f42f9e54c4809d7a3aa8dc276ce
     steps:
-      - name: Install tools
-        run: |
-          apt-get update
-          apt-get install -y binutils ca-certificates curl g++ git python3 unzip
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/checkout@v4
+      - name: Build, test, verify, and package
+        run: bash scripts/build-linux.sh --install-tools
 
-      - name: Fetch build references
-        run: |
-          mkdir -p ../references
-          git init ../references/ambuild
-          git -C ../references/ambuild remote add origin https://github.com/alliedmodders/ambuild.git
-          git -C ../references/ambuild fetch --depth 1 origin ${AMBUILD_COMMIT}
-          git -C ../references/ambuild checkout --detach FETCH_HEAD
-          git clone https://github.com/alliedmodders/metamod-source.git ../references/metamod-source
-          git -C ../references/metamod-source checkout ${MMS_COMMIT}
-          git -C ../references/metamod-source submodule update --init hl2sdk-manifests
-          git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ../references/hl2sdk-cs2
-          git -C ../references/hl2sdk-cs2 checkout ${HL2SDK_COMMIT}
-
-      - name: Download VRF CLI
-        run: |
-          tmp="$(mktemp -d)"
-          curl -L "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${VRF_VERSION}/cli-linux-x64.zip" -o "$tmp/vrf.zip"
-          echo "30d86dfd72bf35c8a38015c81bd92f0b04b1f49304e73a5d734c875803b2685b  $tmp/vrf.zip" | sha256sum -c -
-          unzip -q "$tmp/vrf.zip" -d "$tmp/vrf"
-          cli="$(find "$tmp/vrf" -type f -name Source2Viewer-CLI | head -n 1)"
-          test -n "$cli"
-          mkdir -p tools/vrf/linux64
-          cp -a "$(dirname "$cli")/." tools/vrf/linux64/
-          rm -f tools/vrf/linux64/libTinyEXRNative.so
-          chmod +x tools/vrf/linux64/Source2Viewer-CLI
-
-      - name: Build
-        run: |
-          export CC=gcc CXX=g++
-          export PYTHONPATH="$(pwd)/../references/ambuild"
-          mkdir -p build-linux
-          cd build-linux
-          python3 ../configure.py
-          python3 -c "from ambuild2.run import cli_run; cli_run()"
-
-      - name: Test
-        run: |
-          ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
-          python3 -m unittest -v tests/test_package.py
-
-      - name: Check SteamRT3 ABI
-        run: |
-          python3 - <<'PY'
-          import re
-          import subprocess
-          from pathlib import Path
-
-          limits = {
-              "GLIBC": (2, 31),
-              "GLIBCXX": (3, 4, 28),
-              "CXXABI": (1, 3, 12),
-          }
-          paths = [
-              Path("build-linux/cs2fow/linux-x86_64/cs2fow.so"),
-              Path("build-linux/cs2fow_baker/linux-x86_64/cs2fow_baker"),
-              Path("build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests"),
-          ]
-          paths.extend(Path("tools/vrf/linux64").rglob("*"))
-          failures = []
-          for path in paths:
-              if not path.is_file():
-                  continue
-              with path.open("rb") as stream:
-                  if stream.read(4) != b"\x7fELF":
-                      continue
-              versions = subprocess.check_output(
-                  ["readelf", "--version-info", str(path)], text=True
-              )
-              found = {}
-              for family, limit in limits.items():
-                  matches = {
-                      tuple(map(int, value.split(".")))
-                      for value in re.findall(rf"\b{family}_(\d+(?:\.\d+)+)\b", versions)
-                  }
-                  found[family] = max(matches, default=())
-                  if found[family] > limit:
-                      failures.append(f"{path}: {family}_{'.'.join(map(str, found[family]))}")
-              print(path, " ".join(
-                  f"{family}_{'.'.join(map(str, version))}" for family, version in found.items() if version
-              ))
-          if failures:
-              raise SystemExit("SteamRT3 ABI exceeded:\n" + "\n".join(failures))
-          PY
-
-      - name: Package
-        run: python3 package.py linux-x86_64
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cs2fow-linux-x86_64
           path: |
