@@ -47,7 +47,7 @@ CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE
 	"Maximum sideways shoulder origin distance", 128.0f, true, 0.0f, true, 256.0f,
 	on_convar_changed<float>);
 CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE,
-	"Minimum revealed duration", 47, true, 0, true, 1000, on_convar_changed<int>);
+	"Minimum revealed duration", 200, true, 0, true, 1000, on_convar_changed<int>);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE,
 	"Enable CS2FOW diagnostic logging", false, on_convar_changed<bool>);
 CConVar<int> cs2fow_debug_los_player("cs2fow_debug_los_player", FCVAR_NONE,

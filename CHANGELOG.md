@@ -7,7 +7,8 @@
 - Extracted strict CS2/OS/AVX/gamedata/schema capability checks into a structured compatibility component without weakening the exact server-binary gate or fail-open behavior.
 - Made Visibility Studio runtime-only: Preview and Play now use the real nineteen animated capsule bindings, eight padded AABB corners, muzzle, viewing origins, smoke/HE rules, and native LOS order. The legacy fifteen-point editor, preset, import/export, rays, and static fallback were removed.
 - Centralized pinned Metamod, HL2SDK, AMBuild, VRF, and Steam Runtime 3 inputs in one dependency manifest. Shared Windows/Linux/SteamRT3 scripts now perform bootstrap, tests, ABI/import checks, and packaging for GitHub CI, GitLab CI, and local builds.
-- Preserved runtime visibility decisions, ordering, constants, performance behavior, ConVar names, package layout, and strict fail-open compatibility enforcement.
+- Increased the default reveal hold to 200 ms to suppress short visibility flicker; operators can still tune it with `cs2fow_visibility_hold_ms`.
+- Preserved runtime visibility decisions, ordering, performance behavior, ConVar names, package layout, and strict fail-open compatibility enforcement apart from the documented hold-default change.
 
 ## 0.3.2
 

@@ -81,7 +81,7 @@ def main() -> None:
         "shoulder_base_units {48.0f}": "cs2fow_shoulder_base_units 48",
         "shoulder_rtt_scale {0.4f}": "cs2fow_shoulder_rtt_scale 0.4",
         "max_shoulder_units {128.0f}": "cs2fow_max_shoulder_units 128",
-        "visibility_hold_ms {47}": "cs2fow_visibility_hold_ms 47",
+        "visibility_hold_ms {200}": "cs2fow_visibility_hold_ms 200",
         "debug {}": "cs2fow_debug 0",
         "debug_los_player {}": "cs2fow_debug_los_player 0",
     }
