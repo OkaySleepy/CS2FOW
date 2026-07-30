@@ -2,8 +2,8 @@
 // Update these values when CS2 changes the corresponding engine layouts.
 server_binary_size_windows=32794264
 server_binary_crc32_windows=2755708048
-server_binary_size_linux=40324312
-server_binary_crc32_linux=3200273799
+server_binary_size_linux=40326616
+server_binary_crc32_linux=3531002681
 recipient_slot_offset_windows=576
 recipient_slot_offset_linux=576
 checktransmit_full_update_offset_windows=580
