@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- Updated strict Windows and Linux gamedata for CS2 build `24442510` (`1.41.7.3`).
+- Rebuilt against the latest HL2SDK `159cddd`; Metamod:Source remains current at `2667e8e`.
+
 ## 0.3.1
 
 - Restored eight padded AABB corner checks as a fast, forgiving visibility fallback before the full animated-capsule test. The runtime now tries reveal-hold reuse, chest, AABB corners, muzzle, and finally capsules, so an obvious visible point avoids the more expensive capsule pass.
