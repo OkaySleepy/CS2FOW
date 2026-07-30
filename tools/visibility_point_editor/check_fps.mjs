@@ -39,7 +39,7 @@ assert.ok(holdOrder < capsuleOrder && capsuleOrder < aabbOrder && aabbOrder < mu
 	"native runtime order must remain hold, capsules, AABB, muzzle");
 assert.match(nativeCapsules, /k_capsule_occluder_cache_size\s*=\s*96/,
 	"Studio's proof cache must be reviewed when native capacity changes");
-assert.match(nativeSettings, /cs2fow_visibility_hold_ms[\s\S]{0,160}\b200, true, 0, true, 1000/,
+assert.match(nativeSettings, /cs2fow_visibility_hold_ms[\s\S]{0,160}\b1000, true, 0, true, 1000/,
 	"Studio's reveal-hold control must match the shipped native default and range");
 for (const [source, pattern, name] of [
 	[nativeSamplingHeader, /k_visibility_pixel_grid_size\s*=\s*32/, "32x32 visibility grid"],

@@ -243,7 +243,7 @@ The debug buffer records only primary bits CS2FOW truly removed. Turning debug o
 | `cs2fow_shoulder_base_units` | `48` | Start the left/right shoulder and movement-intention points this far from the player's eye. |
 | `cs2fow_shoulder_rtt_scale` | `0.4` | Add this many units per millisecond of round-trip ping, updated in 25 ms steps. |
 | `cs2fow_max_shoulder_units` | `128` | Never push those ping-scaled viewing points farther out than this. |
-| `cs2fow_visibility_hold_ms` | `200` | Once a player becomes visible, keep them visible for about 0.2 seconds to prevent flicker. |
+| `cs2fow_visibility_hold_ms` | `1000` | Once a player becomes visible, keep them visible for about one second to cover brief LOS gaps and prevent flicker. |
 | `cs2fow_debug` | `0` | Save evidence about entity bits CS2FOW actually removed. It does not spam the console. |
 | `cs2fow_debug_los_player` | `0` | Temporarily draw the live capsule axes, muzzle, and AABB corners for one 1-based player slot. Keep `0` during normal play. |
 

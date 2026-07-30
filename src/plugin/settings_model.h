@@ -18,7 +18,7 @@ struct runtime_configuration
 	float shoulder_base_units {48.0f};
 	float shoulder_rtt_scale {0.4f};
 	float max_shoulder_units {128.0f};
-	int visibility_hold_ms {200};
+	int visibility_hold_ms {1000};
 	bool debug {};
 	int debug_los_player {};
 

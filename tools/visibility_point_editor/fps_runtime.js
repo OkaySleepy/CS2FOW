@@ -887,7 +887,7 @@ export class FpsSimulation
 		this.heSeconds = Number.isFinite(Number(settings.heSeconds)) ? clamp(Number(settings.heSeconds), 0, 10) : DEFAULT_HE_SECONDS;
 		this.botMuzzleLength = Math.max(0, Number(settings.botMuzzleLength) || 0);
 		const requestedHold = Number(settings.visibilityHoldMs);
-		this.visibilityHoldSeconds = (Number.isFinite(requestedHold) ? clamp(requestedHold, 0, 1000) : 200) / 1000;
+		this.visibilityHoldSeconds = (Number.isFinite(requestedHold) ? clamp(requestedHold, 0, 1000) : 1000) / 1000;
 		this.random = seeded_random(settings.seed);
 		this.debug = false;
 		this.targetSets = [];

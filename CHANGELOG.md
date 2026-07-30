@@ -8,7 +8,7 @@
 - Extracted strict CS2/OS/AVX/gamedata/schema capability checks into a structured compatibility component without weakening the exact server-binary gate or fail-open behavior.
 - Made Visibility Studio runtime-only: Preview and Play now use the real nineteen animated capsule bindings, eight padded AABB corners, muzzle, viewing origins, smoke/HE rules, and native LOS order. The legacy fifteen-point editor, preset, import/export, rays, and static fallback were removed.
 - Centralized pinned Metamod, HL2SDK, AMBuild, VRF, and Steam Runtime 3 inputs in one dependency manifest. Shared Windows/Linux/SteamRT3 scripts now perform bootstrap, tests, ABI/import checks, and packaging for GitHub CI, GitLab CI, and local builds.
-- Increased the default reveal hold to 200 ms to suppress short visibility flicker; operators can still tune it with `cs2fow_visibility_hold_ms`.
+- Increased the default reveal hold to 1000 ms to cover brief LOS gaps such as the CT-to-T angle through Dust II mid doors; operators can still tune it with `cs2fow_visibility_hold_ms`.
 - Made Valve's full nineteen-capsule silhouette the primary LOS decision. The eight padded AABB corners and weapon muzzle are now forgiving fallbacks when the capsule silhouette is fully blocked; the redundant chest probe was removed.
 - Preserved runtime ConVar names, package layout, and strict fail-open compatibility enforcement.
 
