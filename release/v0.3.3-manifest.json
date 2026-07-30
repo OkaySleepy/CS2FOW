@@ -1,6 +1,6 @@
 {
   "version": "0.3.3",
-  "source_commit": "827fc71504c02e8486e408d4b7b2c092ccaf6b2a",
+  "source_commit": "dcb3e94a1a36bcc9c488c4de05d6afb97c00e21a",
   "cs2_app_id": 730,
   "cs2_build_id": "24442510",
   "cs2_version": "1.41.7.3",
@@ -32,7 +32,7 @@
     }
   },
   "artifacts": {
-    "cs2fow-0.3.3-windows-x86_64.zip": "a84afeeea97fcdc2563131f19750e3440214949e46df83c1f4f453fcf8b8df7d",
-    "cs2fow-0.3.3-linux-x86_64.zip": "76835aaaef5719f6ecd912fef68d288247f81aa1939a56d3f016e55b1e773098"
+    "cs2fow-0.3.3-windows-x86_64.zip": "2617f8fe7b34735dd2b615e88db3bda7bb7b728a07195d3c24908ca7ab4bca62",
+    "cs2fow-0.3.3-linux-x86_64.zip": "71eeaa8a5149d37e9af5b91deac11729b9c85099d1c8e40f4cde27b13049ab4f"
   }
 }
