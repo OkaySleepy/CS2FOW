@@ -70,6 +70,7 @@ tests.sources += geometry + map_io + [
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
   os.path.join(root, 'src', 'plugin', 'visibility_worker.cpp'),
   os.path.join(root, 'tests', 'map_and_bvh_tests.cpp'),
+  os.path.join(root, 'tests', 'structure_tests.cpp'),
   os.path.join(root, 'tests', 'test_main.cpp'),
   os.path.join(root, 'tests', 'visibility_and_transmit_tests.cpp'),
 ]
@@ -101,6 +102,8 @@ plugin.sources += [
   os.path.join(root, 'src', 'plugin', 'automatic_baker.cpp'),
   os.path.join(root, 'src', 'plugin', 'game_state.cpp'),
   os.path.join(root, 'src', 'plugin', 'plugin.cpp'),
+  os.path.join(root, 'src', 'plugin', 'runtime_compatibility.cpp'),
+  os.path.join(root, 'src', 'plugin', 'settings.cpp'),
   os.path.join(root, 'src', 'plugin', 'transmit.cpp'),
   os.path.join(root, 'src', 'plugin', 'visibility_worker.cpp'),
   os.path.join(sdk['path'], 'tier1', 'convar.cpp'),

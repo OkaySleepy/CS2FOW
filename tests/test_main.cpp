@@ -89,6 +89,7 @@ int run_tests(std::span<const std::filesystem::path> argv)
 		/ ("cs2fow-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 	std::filesystem::remove_all(directory);
 	std::filesystem::create_directories(directory);
+	run_structure_tests();
 	run_map_and_bvh_tests(directory, std::filesystem::absolute(argv[0]));
 	run_visibility_and_transmit_tests();
 	std::filesystem::remove_all(directory);

@@ -5,6 +5,7 @@
 // only after CPU, gamedata, schema, map source, and bake checks all succeed.
 
 #include "vpk.h"
+#include "runtime_health.h"
 
 #include <ISmmPlugin.h>
 #include <eiface.h>
@@ -21,26 +22,14 @@
 #include <array>
 #include <charconv>
 #include <chrono>
-#include <cmath>
-#include <cstdio>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
-#include <cctype>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
 #include <limits>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <vector>
-
-#if defined(_WIN32)
-#include <Windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 namespace cs2fow
 {
@@ -51,41 +40,6 @@ constexpr const char *k_game_event_manager_interface = "GAMEEVENTSMANAGER002";
 GameEventKeySymbol_t game_event_key(const char *name)
 {
 	return {CUtlStringToken(MurmurHash2LowerCase(name, STRINGTOKEN_MURMURHASH_SEED)), name};
-}
-
-void *module_base(const void *address)
-{
-#if defined(_WIN32)
-	HMODULE module {};
-	return GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		reinterpret_cast<LPCSTR>(address), &module) ? module : nullptr;
-#else
-	Dl_info info {};
-	return dladdr(address, &info) != 0 ? info.dli_fbase : nullptr;
-#endif
-}
-
-std::filesystem::path module_path(const void *address)
-{
-#if defined(_WIN32)
-	HMODULE module {};
-	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		reinterpret_cast<LPCSTR>(address), &module))
-	{
-		return {};
-	}
-	std::wstring path(32768, L'\0');
-	const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
-	if (length == 0 || length >= path.size())
-	{
-		return {};
-	}
-	path.resize(length);
-	return path;
-#else
-	Dl_info info {};
-	return dladdr(address, &info) != 0 && info.dli_fname != nullptr ? std::filesystem::path(info.dli_fname) : std::filesystem::path {};
-#endif
 }
 
 using create_entity_by_name_fn = CEntityInstance *(*)(const char *, int);
@@ -120,45 +74,6 @@ bool teleport_entity(CEntityInstance *entity, uint32_t vtable_index, const Vecto
 	}
 	reinterpret_cast<teleport_entity_fn>(vtable[vtable_index])(entity, &origin, nullptr, nullptr);
 	return true;
-}
-
-void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new_value, const bool *old_value)
-{
-	if (new_value != nullptr && old_value != nullptr && *new_value != *old_value)
-	{
-		g_plugin.reset_transmit_state(false);
-	}
-}
-
-void on_cs2fow_float_changed(CConVar<float> *, CSplitScreenSlot, const float *new_value, const float *old_value)
-{
-	if (new_value != nullptr && old_value != nullptr && *new_value != *old_value)
-	{
-		g_plugin.reset_transmit_state(false);
-	}
-}
-
-CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
-CConVar<bool> cs2fow_smoke_occlusion("cs2fow_smoke_occlusion", FCVAR_NONE, "Use live CS2 smoke for visibility", true, on_cs2fow_enable_changed);
-CConVar<float> cs2fow_he_clear_radius_units("cs2fow_he_clear_radius_units", FCVAR_NONE, "HE-cleared smoke channel radius", 100.0f,
-	true, 0.0f, true, 320.0f, on_cs2fow_float_changed);
-CConVar<float> cs2fow_he_clear_seconds("cs2fow_he_clear_seconds", FCVAR_NONE, "HE-cleared smoke channel duration", 2.5f,
-	true, 0.0f, true, 10.0f, on_cs2fow_float_changed);
-CConVar<bool> cs2fow_filter_teammates("cs2fow_filter_teammates", FCVAR_NONE, "Apply visibility filtering to teammates", false, on_cs2fow_enable_changed);
-CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 100);
-CConVar<int> cs2fow_worker_threads("cs2fow_worker_threads", FCVAR_NONE, "Visibility worker thread count (applies on map activation)", 2, true, 1, true, 4);
-CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 48.0f, true, 0.0f, true, 256.0f);
-CConVar<float> cs2fow_shoulder_rtt_scale("cs2fow_shoulder_rtt_scale", FCVAR_NONE, "Sideways shoulder units per RTT millisecond, applied in 25 ms steps", 0.4f, true, 0.0f, true, 4.0f);
-CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 128.0f, true, 0.0f, true, 256.0f);
-CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 47, true, 0, true, 1000);
-CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
-CConVar<int> cs2fow_debug_los_player("cs2fow_debug_los_player", FCVAR_NONE,
-	"Temporarily draw one 1-based player's live capsule axes, muzzle, and AABB corners; 0 removes them",
-	0, true, 0, true, static_cast<int>(k_max_players));
-
-CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
-{
-	g_plugin.print_status();
 }
 
 CON_COMMAND_F(cs2fow_entity, "List, filter, or clear actual CS2FOW transmit clears", FCVAR_NONE)
@@ -200,7 +115,8 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	GET_V_IFACE_CURRENT(GetEngineFactory, engine_, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
 	GET_V_IFACE_CURRENT(GetEngineFactory, cvar_, ICvar, CVAR_INTERFACE_VERSION);
 	GET_V_IFACE_CURRENT(GetFileSystemFactory, filesystem_, IFileSystem, FILESYSTEM_INTERFACE_VERSION);
-	GET_V_IFACE_CURRENT(GetEngineFactory, schema_, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
+	ISchemaSystem *schema {};
+	GET_V_IFACE_CURRENT(GetEngineFactory, schema, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
 	GET_V_IFACE_CURRENT(GetEngineFactory, game_resource_, game_resource_service, GAMERESOURCESERVICESERVER_INTERFACE_VERSION);
 	GET_V_IFACE_ANY(GetServerFactory, server_, IServerGameDLL, INTERFACEVERSION_SERVERGAMEDLL);
 	GET_V_IFACE_ANY(GetServerFactory, game_entities_, ISource2GameEntities, SOURCE2GAMEENTITIES_INTERFACE_VERSION);
@@ -224,29 +140,35 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	}
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_GAMEDLL);
 	teammates_are_enemies_ = cvar_->FindConVar("mp_teammates_are_enemies");
-	engine_->ServerCommand("exec cs2fow.cfg");
+	settings::initialize(engine_, cvar_, [](uint32_t changes)
+	{
+		g_plugin.settings_changed(changes);
+	});
+	if (!settings::begin_load())
+	{
+		META_CONPRINTF("[CS2FOW] warning: could not start the initial configuration load; compiled defaults remain active\n");
+	}
 	g_SMAPI->AddListener(this, this);
 
-	std::string reason;
-	const bool avx = cpu_supports_avx();
-	prerequisites_valid_ = avx && read_gamedata(reason) && verify_server_binary(reason)
-		&& resolve_bone_functions(reason) && resolve_schema(reason);
-	if (prerequisites_valid_ && game_event_manager_vtable_rva_ != 0)
+	compatibility_.initialize(ismm->GetBaseDir(), game_entities_, schema,
+		game_events_ != nullptr);
+	if (compatibility_.valid()
+		&& compatibility_.game_event_manager_vtable() != nullptr)
 	{
-		void *base = module_base(*reinterpret_cast<void **>(game_entities_));
-		if (base != nullptr)
-		{
-			auto *vtable = reinterpret_cast<IGameEventManager2 *>(static_cast<uint8_t *>(base) + game_event_manager_vtable_rva_);
-			game_event_load_hook_id_ = SH_ADD_DVPHOOK(IGameEventManager2, LoadEventsFromFile, vtable,
-				SH_MEMBER(this, &plugin::hook_load_events_from_file), true);
-		}
+		auto *vtable = static_cast<IGameEventManager2 *>(
+			compatibility_.game_event_manager_vtable());
+		game_event_load_hook_id_ = SH_ADD_DVPHOOK(IGameEventManager2,
+			LoadEventsFromFile, vtable,
+			SH_MEMBER(this, &plugin::hook_load_events_from_file), true);
 	}
-	if (!prerequisites_valid_)
+	if (!compatibility_.valid())
 	{
-		disable(avx ? reason : "AVX and OS AVX state are required");
-		META_CONPRINTF("[CS2FOW] disabled: %s\n", disabled_reason_.c_str());
+		disable(compatibility_.report().technical_detail);
+		META_CONPRINTF("[CS2FOW] %s: %s\n",
+			compatibility_state_name(compatibility_.report().state),
+			disabled_reason_.c_str());
 	}
-	else if (!smoke_gamedata_available_ || !smoke_schema_available_)
+	else if (!compatibility_.smoke_available())
 	{
 		META_CONPRINTF("[CS2FOW] smoke occlusion unavailable; wall filtering remains active\n");
 	}
@@ -272,6 +194,8 @@ bool plugin::Unload(char *error, size_t max_length)
 	if (check_transmit_hook_id_ != 0) SH_REMOVE_HOOK_ID(check_transmit_hook_id_);
 	game_frame_hook_id_ = 0;
 	check_transmit_hook_id_ = 0;
+	settings::cancel_load();
+	settings::shutdown();
 	ConVar_Unregister();
 	return true;
 }
@@ -300,10 +224,9 @@ void plugin::FireGameEvent(IGameEvent *event)
 
 void plugin::OnLevelInit(char const *map_name, char const *, char const *, char const *, bool, bool)
 {
-	engine_->ServerCommand("exec cs2fow.cfg");
 	if (map_name != nullptr && map_name[0] != '\0')
 	{
-		change_map(map_name);
+		request_map_change(map_name);
 	}
 }
 
@@ -316,212 +239,15 @@ void plugin::OnLevelShutdown()
 	source_ = {};
 	reset_transmit_state();
 	map_.clear();
-	if (prerequisites_valid_)
+	pending_map_.clear();
+	if (settings::cancel_load())
+	{
+		META_CONPRINTF("[CS2FOW] configuration load interrupted by map shutdown; previous settings restored\n");
+	}
+	if (compatibility_.valid())
 	{
 		disabled_reason_ = "no map loaded";
 	}
-}
-
-bool plugin::read_gamedata(std::string &error)
-{
-	const std::filesystem::path path = std::filesystem::path(api_->GetBaseDir()) / "addons" / "cs2fow" / "gamedata" / "cs2fow.games.txt";
-	std::ifstream stream(path);
-	if (!stream)
-	{
-		error = "missing gamedata: " + path.string();
-		return false;
-	}
-	recipient_slot_offset_ = 0;
-	entity_system_offset_ = 0;
-	server_binary_size_ = 0;
-	server_binary_crc32_ = 0;
-	transmit_offsets_ = {};
-	smoke_layout_ = {};
-	game_event_manager_vtable_rva_ = 0;
-	lookup_bone_rva_ = 0;
-	get_bone_transform_rva_ = 0;
-	create_entity_by_name_rva_ = 0;
-	dispatch_spawn_rva_ = 0;
-	remove_entity_rva_ = 0;
-	teleport_vtable_index_ = 0;
-	smoke_gamedata_available_ = true;
-#if defined(_WIN32)
-	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
-	constexpr std::string_view k_server_size_key = "server_binary_size_windows";
-	constexpr std::string_view k_server_crc_key = "server_binary_crc32_windows";
-	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_windows";
-	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_windows";
-	constexpr std::string_view k_smoke_volume_key = "smoke_volume_offset_windows";
-	constexpr std::string_view k_smoke_storage_key = "smoke_storage_offset_windows";
-	constexpr std::string_view k_smoke_frame_key = "smoke_frame_offset_windows";
-	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_windows";
-	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_windows";
-	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_windows";
-	constexpr std::string_view k_lookup_bone_key = "lookup_bone_rva_windows";
-	constexpr std::string_view k_get_bone_transform_key = "get_bone_transform_rva_windows";
-	constexpr std::string_view k_create_entity_key = "create_entity_by_name_rva_windows";
-	constexpr std::string_view k_dispatch_spawn_key = "dispatch_spawn_rva_windows";
-	constexpr std::string_view k_remove_entity_key = "remove_entity_rva_windows";
-	constexpr std::string_view k_teleport_key = "teleport_vtable_index_windows";
-#else
-	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
-	constexpr std::string_view k_server_size_key = "server_binary_size_linux";
-	constexpr std::string_view k_server_crc_key = "server_binary_crc32_linux";
-	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_linux";
-	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_linux";
-	constexpr std::string_view k_smoke_volume_key = "smoke_volume_offset_linux";
-	constexpr std::string_view k_smoke_storage_key = "smoke_storage_offset_linux";
-	constexpr std::string_view k_smoke_frame_key = "smoke_frame_offset_linux";
-	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_linux";
-	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_linux";
-	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_linux";
-	constexpr std::string_view k_lookup_bone_key = "lookup_bone_rva_linux";
-	constexpr std::string_view k_get_bone_transform_key = "get_bone_transform_rva_linux";
-	constexpr std::string_view k_create_entity_key = "create_entity_by_name_rva_linux";
-	constexpr std::string_view k_dispatch_spawn_key = "dispatch_spawn_rva_linux";
-	constexpr std::string_view k_remove_entity_key = "remove_entity_rva_linux";
-	constexpr std::string_view k_teleport_key = "teleport_vtable_index_linux";
-#endif
-	std::string line;
-	while (std::getline(stream, line))
-	{
-		const size_t equals = line.find('=');
-		if (equals == std::string::npos || line.starts_with("//"))
-		{
-			continue;
-		}
-		const std::string key = line.substr(0, equals);
-		const bool smoke_key = key == k_smoke_volume_key || key == k_smoke_storage_key || key == k_smoke_frame_key
-			|| key == k_smoke_center_key || key == k_smoke_start_time_key;
-		const bool debug_beam_key = key == k_create_entity_key || key == k_dispatch_spawn_key
-			|| key == k_remove_entity_key || key == k_teleport_key;
-		if (key != k_server_size_key && key != k_server_crc_key && key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key
-			&& key != k_game_event_vtable_key && key != k_lookup_bone_key && key != k_get_bone_transform_key
-			&& !debug_beam_key && !smoke_key)
-		{
-			continue;
-		}
-		std::string_view text(line.data() + equals + 1u, line.size() - equals - 1u);
-		uint32_t value {};
-		if (!parse_gamedata_uint32(text, value))
-		{
-			if (smoke_key || debug_beam_key || key == k_game_event_vtable_key)
-			{
-				if (smoke_key) smoke_gamedata_available_ = false;
-				continue;
-			}
-			error = "invalid gamedata value for " + key;
-			return false;
-		}
-		if (key == k_server_size_key) server_binary_size_ = value;
-		if (key == k_server_crc_key) server_binary_crc32_ = value;
-		if (key == k_recipient_key) recipient_slot_offset_ = value;
-		if (key == k_entity_system_key) entity_system_offset_ = value;
-		if (key == k_full_update_key) transmit_offsets_.full_update_offset = value;
-		if (key == k_smoke_volume_key) smoke_layout_.volume = value;
-		if (key == k_smoke_storage_key) smoke_layout_.storage = value;
-		if (key == k_smoke_frame_key) smoke_layout_.frame = value;
-		if (key == k_smoke_center_key) smoke_layout_.center = value;
-		if (key == k_smoke_start_time_key) smoke_layout_.start_time = value;
-		if (key == k_game_event_vtable_key) game_event_manager_vtable_rva_ = value;
-		if (key == k_lookup_bone_key) lookup_bone_rva_ = value;
-		if (key == k_get_bone_transform_key) get_bone_transform_rva_ = value;
-		if (key == k_create_entity_key) create_entity_by_name_rva_ = value;
-		if (key == k_dispatch_spawn_key) dispatch_spawn_rva_ = value;
-		if (key == k_remove_entity_key) remove_entity_rva_ = value;
-		if (key == k_teleport_key) teleport_vtable_index_ = value;
-	}
-	if (server_binary_size_ == 0 || server_binary_crc32_ == 0 || recipient_slot_offset_ == 0
-		|| entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0
-		|| lookup_bone_rva_ == 0 || get_bone_transform_rva_ == 0)
-	{
-		error = "gamedata does not contain this platform's required values";
-		return false;
-	}
-	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo) || recipient_slot_offset_ > k_max_gamedata_offset || recipient_slot_offset_ % alignof(int) != 0
-		|| entity_system_offset_ < sizeof(void *) || entity_system_offset_ > k_max_gamedata_offset || entity_system_offset_ % alignof(void *) != 0
-		|| !valid_gamedata_offset(transmit_offsets_.full_update_offset, static_cast<uint32_t>(alignof(bool)), k_max_gamedata_offset)
-		|| !valid_gamedata_offset(lookup_bone_rva_, 1, k_max_module_rva)
-		|| !valid_gamedata_offset(get_bone_transform_rva_, 1, k_max_module_rva))
-	{
-		error = "gamedata contains invalid offsets for this platform";
-		return false;
-	}
-	smoke_gamedata_available_ = smoke_gamedata_available_
-		&& valid_gamedata_offset(smoke_layout_.volume, static_cast<uint32_t>(alignof(void *)), k_max_gamedata_offset)
-		&& valid_gamedata_offset(smoke_layout_.storage, static_cast<uint32_t>(alignof(void *)), k_max_gamedata_offset)
-		&& valid_gamedata_offset(smoke_layout_.frame, static_cast<uint32_t>(alignof(int32_t)), k_max_gamedata_offset)
-		&& valid_gamedata_offset(smoke_layout_.center, static_cast<uint32_t>(alignof(float)), k_max_gamedata_offset)
-		&& valid_gamedata_offset(smoke_layout_.start_time, static_cast<uint32_t>(alignof(float)), k_max_gamedata_offset);
-	if (!valid_gamedata_offset(game_event_manager_vtable_rva_, static_cast<uint32_t>(alignof(void *)), k_max_module_rva))
-	{
-		game_event_manager_vtable_rva_ = 0;
-	}
-	if (!valid_gamedata_offset(create_entity_by_name_rva_, 1, k_max_module_rva)
-		|| !valid_gamedata_offset(dispatch_spawn_rva_, 1, k_max_module_rva)
-		|| !valid_gamedata_offset(remove_entity_rva_, 1, k_max_module_rva)
-		|| teleport_vtable_index_ == 0 || teleport_vtable_index_ > k_max_vtable_index)
-	{
-		create_entity_by_name_rva_ = 0;
-		dispatch_spawn_rva_ = 0;
-		remove_entity_rva_ = 0;
-		teleport_vtable_index_ = 0;
-	}
-	return true;
-}
-
-bool plugin::verify_server_binary(std::string &error)
-{
-	std::ostringstream expected;
-	expected << "expected size=" << server_binary_size_ << " crc=0x" << std::hex << server_binary_crc32_;
-	if (game_entities_ == nullptr)
-	{
-		error = "server game-entities interface is unavailable; " + expected.str() + ", actual unavailable";
-		return false;
-	}
-	const std::filesystem::path path = module_path(*reinterpret_cast<void **>(game_entities_));
-	if (path.empty())
-	{
-		error = "could not resolve the loaded server binary path; " + expected.str() + ", actual unavailable";
-		return false;
-	}
-	uint64_t actual_size = 0;
-	uint32_t actual_crc = 0;
-	std::string fingerprint_error;
-	if (!file_crc32(path, actual_size, actual_crc, fingerprint_error))
-	{
-		error = "could not verify loaded server binary: " + fingerprint_error + "; " + expected.str() + ", actual unavailable";
-		return false;
-	}
-	if (actual_size != server_binary_size_ || actual_crc != server_binary_crc32_)
-	{
-		std::ostringstream message;
-		message << "server binary does not match verified gamedata: expected size=" << server_binary_size_
-			<< " crc=0x" << std::hex << server_binary_crc32_ << std::dec << ", actual size=" << actual_size
-			<< " crc=0x" << std::hex << actual_crc;
-		error = message.str();
-		return false;
-	}
-	return true;
-}
-
-bool plugin::resolve_bone_functions(std::string &error)
-{
-	void *base = game_entities_ == nullptr ? nullptr : module_base(*reinterpret_cast<void **>(game_entities_));
-	if (base == nullptr)
-	{
-		error = "could not resolve the loaded server binary base for animated body points";
-		return false;
-	}
-	lookup_bone_ = static_cast<uint8_t *>(base) + lookup_bone_rva_;
-	get_bone_transform_ = static_cast<uint8_t *>(base) + get_bone_transform_rva_;
-	if (create_entity_by_name_rva_ != 0)
-	{
-		create_entity_by_name_ = static_cast<uint8_t *>(base) + create_entity_by_name_rva_;
-		dispatch_spawn_ = static_cast<uint8_t *>(base) + dispatch_spawn_rva_;
-		remove_entity_ = static_cast<uint8_t *>(base) + remove_entity_rva_;
-	}
-	return true;
 }
 
 void plugin::disable(std::string reason)
@@ -616,14 +342,176 @@ void plugin::activate(bvh8_data data)
 	worker_.stop();
 	reset_transmit_state();
 	data_ = std::move(data);
-	if (!worker_.start(&data_, static_cast<uint32_t>(cs2fow_worker_threads.Get())))
+	active_worker_threads_ = static_cast<uint32_t>(settings::current().worker_threads);
+	if (!worker_.start(&data_, active_worker_threads_))
 	{
+		active_worker_threads_ = 0;
 		disable("could not start visibility worker threads");
 		return;
 	}
 	disabled_reason_.clear();
 	META_CONPRINTF("[CS2FOW] active for %s: crc=0x%08x, triangles=%u, nodes=%u, packets=%u\n", map_.c_str(), data_.header.source_crc32,
 		data_.header.triangle_count, data_.header.node_count, data_.header.packet_count);
+}
+
+void plugin::request_map_change(const std::string &map)
+{
+	if (map.empty() || pending_map_ == map)
+	{
+		return;
+	}
+	automatic_baker_.stop();
+	worker_.stop();
+	active_worker_threads_ = 0;
+	destroy_los_debug_beams();
+	data_ = {};
+	source_ = {};
+	reset_transmit_state();
+	pending_map_ = map;
+	disabled_reason_ = "loading configuration";
+	if (settings::loading())
+	{
+		settings::cancel_load();
+	}
+	if (!settings::begin_load())
+	{
+		META_CONPRINTF("[CS2FOW] warning: cs2fow.cfg could not be queued; keeping the previous settings\n");
+		finish_config_load(false);
+		return;
+	}
+	META_CONPRINTF("[CS2FOW] loading cs2fow.cfg before activating %s\n", map.c_str());
+}
+
+void plugin::finish_config_load(bool success)
+{
+	if (success)
+	{
+		META_CONPRINTF("[CS2FOW] cs2fow.cfg loaded and committed\n");
+	}
+	else
+	{
+		META_CONPRINTF("[CS2FOW] cs2fow.cfg did not finish; previous settings restored\n");
+	}
+	if (pending_map_.empty())
+	{
+		return;
+	}
+	std::string map = std::move(pending_map_);
+	pending_map_.clear();
+	change_map(map);
+}
+
+void plugin::reload_config()
+{
+	if (settings::loading())
+	{
+		META_CONPRINTF("[CS2FOW] a configuration load is already in progress; wait for it to finish\n");
+		return;
+	}
+	if (!settings::begin_load())
+	{
+		META_CONPRINTF("[CS2FOW] cs2fow.cfg could not be queued because the server command service is unavailable\n");
+		return;
+	}
+	META_CONPRINTF("[CS2FOW] reloading cs2fow.cfg; changes commit only after its final marker\n");
+}
+
+void plugin::config_loaded()
+{
+	if (!settings::loading())
+	{
+		META_CONPRINTF("[CS2FOW] ignored an unexpected cs2fow_config_loaded marker\n");
+		return;
+	}
+	finish_config_load(settings::complete_load());
+}
+
+void plugin::settings_changed(uint32_t changes)
+{
+	if ((changes & setting_change_visibility) != 0)
+	{
+		reset_transmit_state(false);
+	}
+}
+
+void plugin::print_help() const
+{
+	META_CONPRINTF("[CS2FOW] administrator commands:\n");
+	META_CONPRINTF("[CS2FOW] cs2fow_status - Show concise protection, map, configuration, and performance health.\n");
+	META_CONPRINTF("[CS2FOW] cs2fow_metrics - Show the complete technical runtime counters.\n");
+	META_CONPRINTF("[CS2FOW] cs2fow_reload - Transactionally reload cs2fow.cfg.\n");
+	META_CONPRINTF("[CS2FOW] cs2fow_check_config - Check settings without changing them.\n");
+	META_CONPRINTF("[CS2FOW] cs2fow_entity [<edict>|clear] - Inspect actual debug-mode transmit clears.\n");
+}
+
+void plugin::check_config() const
+{
+	const runtime_configuration &configuration = settings::current();
+	int findings = 0;
+	const uint32_t configuration_findings = validate_configuration(configuration);
+	META_CONPRINTF("[CS2FOW] checking the committed configuration; nothing will be changed\n");
+	if (settings::loading())
+	{
+		META_CONPRINTF("[CS2FOW] review: cs2fow.cfg is still loading; committed settings remain active meanwhile\n");
+		++findings;
+	}
+	else if (settings::load_state() == configuration_load_state::failed)
+	{
+		META_CONPRINTF("[CS2FOW] review: the last cs2fow.cfg load did not reach cs2fow_config_loaded; previous settings were restored\n");
+		++findings;
+	}
+	if ((configuration_findings & configuration_finding_disabled) != 0)
+	{
+		META_CONPRINTF("[CS2FOW] review cs2fow_enable: protection is disabled by configuration\n");
+		++findings;
+	}
+	if ((configuration_findings & configuration_finding_shoulder_range) != 0)
+	{
+		META_CONPRINTF("[CS2FOW] review shoulder settings: max is below base, so the effective maximum equals the base\n");
+		++findings;
+	}
+	if ((configuration_findings & configuration_finding_he_pair) != 0)
+	{
+		META_CONPRINTF("[CS2FOW] review HE clearing: set both radius and duration to zero to disable it consistently\n");
+		++findings;
+	}
+	if (configuration.smoke_occlusion && !compatibility_.smoke_available())
+	{
+		META_CONPRINTF("[CS2FOW] review smoke occlusion: it is requested but unavailable for this CS2 build\n");
+		++findings;
+	}
+	if (active_worker_threads_ != 0
+		&& active_worker_threads_ != static_cast<uint32_t>(configuration.worker_threads))
+	{
+		META_CONPRINTF("[CS2FOW] note: worker threads are configured as %d; %u remain active until the next map\n",
+			configuration.worker_threads, active_worker_threads_);
+		++findings;
+	}
+	if ((configuration_findings & configuration_finding_debug_los) != 0)
+	{
+		META_CONPRINTF("[CS2FOW] note: temporary LOS debug is enabled for player %d\n",
+			configuration.debug_los_player);
+		++findings;
+	}
+	int donttransmit = 0;
+	if (!settings::donttransmit_mode(donttransmit))
+	{
+		META_CONPRINTF("[CS2FOW] review sv_enable_donttransmit: the Valve setting could not be read\n");
+		++findings;
+	}
+	else
+	{
+		META_CONPRINTF("[CS2FOW] sv_enable_donttransmit=%d is supported\n", donttransmit);
+	}
+	if (findings == 0)
+	{
+		META_CONPRINTF("[CS2FOW] configuration check passed; everything is ready\n");
+	}
+	else
+	{
+		META_CONPRINTF("[CS2FOW] configuration check found %d item%s to review\n",
+			findings, findings == 1 ? "" : "s");
+	}
 }
 
 void plugin::start_automatic_bake(const std::string &map, const map_source &source, const std::filesystem::path &output, const std::string &reason)
@@ -704,7 +592,7 @@ void plugin::change_map(const std::string &map)
 	source_ = {};
 	reset_transmit_state();
 	map_ = map;
-	if (!prerequisites_valid_)
+	if (!compatibility_.valid())
 	{
 		return;
 	}
@@ -728,6 +616,10 @@ void plugin::change_map(const std::string &map)
 
 void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 {
+	if (settings::poll_timeout())
+	{
+		finish_config_load(false);
+	}
 	if (!he_event_available_ && game_events_ != nullptr)
 	{
 		he_event_available_ = game_events_->AddListener(this, "hegrenade_detonate", true);
@@ -739,12 +631,13 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 		return;
 	}
 	const char *current_map = network_server->GetMapName();
-	if (current_map != nullptr && map_ != current_map)
+	if (current_map != nullptr && map_ != current_map && pending_map_ != current_map)
 	{
-		change_map(current_map);
+		request_map_change(current_map);
 	}
 	poll_automatic_bake();
-	if (!simulating || !cs2fow_enable.Get() || !disabled_reason_.empty())
+	const runtime_configuration &configuration = settings::current();
+	if (!simulating || !configuration.enable || !disabled_reason_.empty())
 	{
 		destroy_los_debug_beams();
 		return;
@@ -756,7 +649,7 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 		return;
 	}
 	const auto now = std::chrono::steady_clock::now();
-	if (now - last_snapshot_ < std::chrono::milliseconds(cs2fow_update_interval_ms.Get()))
+	if (now - last_snapshot_ < std::chrono::milliseconds(configuration.update_interval_ms))
 	{
 		return;
 	}
@@ -776,23 +669,22 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	}
 	draw_los_debug(value);
 	last_snapshot_ = now;
-	worker_.submit(std::move(value), static_cast<uint32_t>(cs2fow_visibility_hold_ms.Get()), {
-		cs2fow_shoulder_base_units.Get(),
-		cs2fow_shoulder_rtt_scale.Get(),
-		cs2fow_max_shoulder_units.Get()
+	worker_.submit(std::move(value), static_cast<uint32_t>(configuration.visibility_hold_ms), {
+		configuration.shoulder_base_units,
+		configuration.shoulder_rtt_scale,
+		configuration.max_shoulder_units
 	});
 }
 
 void plugin::draw_los_debug(const visibility_snapshot &value)
 {
-	const int player_number = cs2fow_debug_los_player.Get();
+	const int player_number = settings::current().debug_los_player;
 	if (player_number == 0)
 	{
 		destroy_los_debug_beams();
 		return;
 	}
-	if (!debug_beam_schema_available_ || create_entity_by_name_ == nullptr || dispatch_spawn_ == nullptr
-		|| remove_entity_ == nullptr || teleport_vtable_index_ == 0 || los_debug_failed_
+	if (!compatibility_.debug_beam_available() || los_debug_failed_
 		|| value.captured - last_los_debug_draw_ < k_los_debug_interval)
 	{
 		return;
@@ -818,9 +710,12 @@ void plugin::draw_los_debug(const visibility_snapshot &value)
 	const auto aabb_points = visibility_aabb_points(visibility_sample(player));
 	const uint32_t aabb_start = capsule_count + static_cast<uint32_t>(has_muzzle);
 	const uint32_t debug_count = aabb_start + (capsule_count == 0 ? 0u : k_visibility_aabb_point_count);
-	auto create_entity = reinterpret_cast<create_entity_by_name_fn>(create_entity_by_name_);
-	auto dispatch_spawn = reinterpret_cast<dispatch_spawn_fn>(dispatch_spawn_);
-	auto remove_entity = reinterpret_cast<remove_entity_fn>(remove_entity_);
+	auto create_entity = reinterpret_cast<create_entity_by_name_fn>(
+		compatibility_.create_entity_by_name());
+	auto dispatch_spawn = reinterpret_cast<dispatch_spawn_fn>(
+		compatibility_.dispatch_spawn());
+	auto remove_entity = reinterpret_cast<remove_entity_fn>(
+		compatibility_.remove_entity());
 	for (uint32_t index = 0; index < los_debug_beams_.size(); ++index)
 	{
 		los_debug_beam &beam = los_debug_beams_[index];
@@ -847,17 +742,17 @@ void plugin::draw_los_debug(const visibility_snapshot &value)
 		{
 			entity = create_entity("env_beam", -1);
 			const CEntityHandle handle = entity_handle(entity);
-			if (entity == nullptr || !handle.IsValid() || !teleport_entity(entity, teleport_vtable_index_, start))
+			if (entity == nullptr || !handle.IsValid() || !teleport_entity(entity, compatibility_.teleport_vtable_index(), start))
 			{
 				if (entity != nullptr) remove_entity(entity);
 				entity = nullptr;
 			}
 			else
 			{
-				entity_field<Vector>(entity, fields_.beam_end_position) = end;
-				entity_field<float>(entity, fields_.beam_width) = 1.25f;
-				entity_field<float>(entity, fields_.beam_end_width) = 1.25f;
-				entity_field<Color>(entity, fields_.render_color) = los_debug_color(color);
+				entity_field<Vector>(entity, compatibility_.fields().beam_end_position) = end;
+				entity_field<float>(entity, compatibility_.fields().beam_width) = 1.25f;
+				entity_field<float>(entity, compatibility_.fields().beam_end_width) = 1.25f;
+				entity_field<Color>(entity, compatibility_.fields().render_color) = los_debug_color(color);
 				dispatch_spawn(entity, nullptr);
 				entity = system->GetEntityInstance(handle);
 				if (entity != nullptr) beam = {handle, color};
@@ -872,19 +767,19 @@ void plugin::draw_los_debug(const visibility_snapshot &value)
 			continue;
 		}
 
-		if (!teleport_entity(entity, teleport_vtable_index_, start))
+		if (!teleport_entity(entity, compatibility_.teleport_vtable_index(), start))
 		{
 			destroy_los_debug_beams();
 			los_debug_failed_ = true;
 			META_CONPRINTF("[CS2FOW] temporary LOS beam movement failed; set cs2fow_debug_los_player 0 before retrying\n");
 			return;
 		}
-		entity_field<Vector>(entity, fields_.beam_end_position) = end;
-		entity->NetworkStateChanged(NetworkStateChangedData(fields_.beam_end_position));
+		entity_field<Vector>(entity, compatibility_.fields().beam_end_position) = end;
+		entity->NetworkStateChanged(NetworkStateChangedData(compatibility_.fields().beam_end_position));
 		if (beam.color != color)
 		{
-			entity_field<Color>(entity, fields_.render_color) = los_debug_color(color);
-			entity->NetworkStateChanged(NetworkStateChangedData(fields_.render_color));
+			entity_field<Color>(entity, compatibility_.fields().render_color) = los_debug_color(color);
+			entity->NetworkStateChanged(NetworkStateChangedData(compatibility_.fields().render_color));
 			beam.color = color;
 		}
 	}
@@ -893,7 +788,8 @@ void plugin::draw_los_debug(const visibility_snapshot &value)
 void plugin::destroy_los_debug_beams(bool remove_entities)
 {
 	CGameEntitySystem *system = remove_entities ? entity_system() : nullptr;
-	auto remove_entity = reinterpret_cast<remove_entity_fn>(remove_entity_);
+	auto remove_entity = reinterpret_cast<remove_entity_fn>(
+		compatibility_.remove_entity());
 	for (los_debug_beam &beam : los_debug_beams_)
 	{
 		if (system != nullptr && remove_entity != nullptr && beam.handle.IsValid())
@@ -911,6 +807,109 @@ void plugin::destroy_los_debug_beams(bool remove_entities)
 
 void plugin::print_status() const
 {
+	const runtime_configuration &configuration = settings::current();
+	const worker_stats stats = worker_.stats();
+	const std::shared_ptr<const visibility_result> result = worker_.result();
+	const double age_ms = result == nullptr ? -1.0
+		: std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - result->captured).count();
+	uint32_t players = 0;
+	if (result != nullptr)
+	{
+		for (const player_state &player : result->players)
+		{
+			if (player.valid)
+			{
+				++players;
+			}
+		}
+	}
+
+	runtime_health_state state = runtime_health_state::starting;
+	const char *action = nullptr;
+	if (settings::loading())
+	{
+		state = runtime_health_state::loading_configuration;
+	}
+	else if (!compatibility_.valid())
+	{
+		const compatibility_report &report = compatibility_.report();
+		state = report.state == compatibility_state::unsupported_system
+			? runtime_health_state::unsupported_system
+			: report.state == compatibility_state::update_required
+				? runtime_health_state::update_required : runtime_health_state::error;
+		action = report.operator_action.c_str();
+	}
+	else if (!configuration.enable)
+	{
+		state = runtime_health_state::disabled;
+		action = "Set cs2fow_enable 1 or update cs2fow.cfg.";
+	}
+	else if (disabled_reason_.empty())
+	{
+		state = runtime_health_state::protected_state;
+	}
+	else if (disabled_reason_ == "automatic bake in progress")
+	{
+		state = runtime_health_state::baking;
+		action = "Wait for the automatic map bake to finish.";
+	}
+	else if (disabled_reason_ == "validating map" || disabled_reason_ == "no map loaded"
+		|| disabled_reason_ == "loading configuration")
+	{
+		state = runtime_health_state::loading_map;
+	}
+	else
+	{
+		state = runtime_health_state::error;
+		action = "Run cs2fow_metrics and check the first reported error.";
+	}
+	if (action == nullptr
+		&& settings::load_state() == configuration_load_state::failed)
+	{
+		action = "Run cs2fow_check_config, fix cs2fow.cfg, then run cs2fow_reload.";
+	}
+
+	META_CONPRINTF("[CS2FOW] CS2FOW %s: %s\n", CS2FOW_VERSION,
+		runtime_health_state_name(state));
+	const char *configuration_state = settings::loading() ? "loading"
+		: settings::load_state() == configuration_load_state::failed ? "previous settings restored after a failed load"
+		: settings::load_state() == configuration_load_state::loaded ? "loaded" : "compiled defaults";
+	META_CONPRINTF("[CS2FOW] Configuration: %s; worker threads configured=%d active=%u\n",
+		configuration_state, configuration.worker_threads, active_worker_threads_);
+	META_CONPRINTF("[CS2FOW] Map: %s%s%s\n",
+		pending_map_.empty() ? (map_.empty() ? "<none>" : map_.c_str()) : pending_map_.c_str(),
+		disabled_reason_.empty() ? "" : "; ",
+		disabled_reason_.empty() ? "" : disabled_reason_.c_str());
+	const bool smoke_available = result != nullptr ? result->smoke_available
+		: compatibility_.smoke_available();
+	const bool ffa = teammates_are_enemies();
+	META_CONPRINTF("[CS2FOW] Protection: walls=%s smoke=%s HE=%s teammates=%s\n",
+		disabled_reason_.empty() && configuration.enable ? "on" : "off",
+		configuration.smoke_occlusion && smoke_available ? "on" : "off",
+		configuration.smoke_occlusion && configuration.he_clear_radius_units > 0.0f
+			&& configuration.he_clear_seconds > 0.0f && he_event_available_
+				? "on" : "off",
+		visibility_teammate_filter_enabled(configuration.filter_teammates, ffa) ? "filtered" : "not filtered");
+	META_CONPRINTF("[CS2FOW] Runtime: players=%u pairs=%u recent_p99=%.3fms snapshot_age=%.1fms\n",
+		players, stats.evaluated_pairs, stats.recent_p99_ms, age_ms);
+	if (action != nullptr)
+	{
+		META_CONPRINTF("[CS2FOW] Next action: %s\n", action);
+	}
+}
+
+void plugin::print_metrics() const
+{
+	const compatibility_report &compatibility = compatibility_.report();
+	META_CONPRINTF("[CS2FOW] compatibility state=%s detail=%s\n",
+		compatibility_state_name(compatibility.state),
+		compatibility.technical_detail.c_str());
+	for (const std::string &capability : compatibility.missing_capabilities)
+	{
+		META_CONPRINTF("[CS2FOW] optional capability unavailable: %s\n",
+			capability.c_str());
+	}
 	const worker_stats stats = worker_.stats();
 	const std::shared_ptr<const visibility_result> result = worker_.result();
 	runtime_timing_stats capture_timing;
@@ -928,7 +927,7 @@ void plugin::print_status() const
 	}
 	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->captured).count() : -1.0;
 	META_CONPRINTF("[CS2FOW] %s; map=%s crc=0x%08x version=%u triangles=%u nodes=%u packets=%u bytes=%llu depth=%u\n",
-		disabled_reason_.empty() && cs2fow_enable.Get() ? "active" : (disabled_reason_.empty() ? "disabled by convar" : disabled_reason_.c_str()), map_.c_str(),
+		disabled_reason_.empty() && settings::current().enable ? "active" : (disabled_reason_.empty() ? "disabled by convar" : disabled_reason_.c_str()), map_.c_str(),
 		data_.header.source_crc32, data_.header.version, data_.header.triangle_count, data_.header.node_count, data_.header.packet_count,
 		static_cast<unsigned long long>(data_.header.file_size), data_.header.max_depth);
 	META_CONPRINTF("[CS2FOW] worker threads=%u wall=%.3fms active=%.3fms recent_p95=%.3fms recent_p99=%.3fms lifetime_average=%.3fms maximum=%.3fms snapshot_age=%.1fms\n",
@@ -958,19 +957,19 @@ void plugin::print_status() const
 		transmit_timing.latest_ms, transmit_timing.average_ms(), transmit_timing.maximum_ms,
 		static_cast<unsigned long long>(transmit_timing.calls));
 	const bool smoke_available = result != nullptr ? result->smoke_available
-		: smoke_gamedata_available_ && smoke_schema_available_;
+		: compatibility_.smoke_available();
 	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_listener=%d he_active=%u\n",
-		cs2fow_smoke_occlusion.Get() ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
+		settings::current().smoke_occlusion ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
 		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
 	const bool ffa = teammates_are_enemies();
 	META_CONPRINTF("[CS2FOW] teammate filtering configured=%d ffa=%d effective=%d\n",
-		cs2fow_filter_teammates.Get() ? 1 : 0, ffa ? 1 : 0,
-		visibility_teammate_filter_enabled(cs2fow_filter_teammates.Get(), ffa) ? 1 : 0);
+		settings::current().filter_teammates ? 1 : 0, ffa ? 1 : 0,
+		visibility_teammate_filter_enabled(settings::current().filter_teammates, ffa) ? 1 : 0);
 	const uint32_t debug_beams = static_cast<uint32_t>(std::count_if(los_debug_beams_.begin(), los_debug_beams_.end(),
 		[](const los_debug_beam &beam) { return beam.handle.IsValid(); }));
 	META_CONPRINTF("[CS2FOW] temporary LOS debug player=%d available=%d beams=%u failed=%d\n",
-		cs2fow_debug_los_player.Get(), debug_beam_schema_available_ && create_entity_by_name_ != nullptr
-			&& dispatch_spawn_ != nullptr && remove_entity_ != nullptr && teleport_vtable_index_ != 0 ? 1 : 0,
+		settings::current().debug_los_player,
+		compatibility_.debug_beam_available() ? 1 : 0,
 		debug_beams, los_debug_failed_ ? 1 : 0);
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
