@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3
+
+- Centralized every CS2FOW setting behind a committed runtime snapshot. `cs2fow.cfg` now loads transactionally, retains the previous known-good settings until its final marker, rolls back incomplete loads after five seconds, and defers worker-thread changes until the next map.
+- Added `cs2fow_help`, `cs2fow_reload`, `cs2fow_check_config`, and `cs2fow_metrics`. `cs2fow_status` is now a short operator dashboard with explicit health, configuration, map, protection, player/pair, p99, snapshot-age, and next-action information; the former detailed counters remain in `cs2fow_metrics`.
+- Extracted strict CS2/OS/AVX/gamedata/schema capability checks into a structured compatibility component without weakening the exact server-binary gate or fail-open behavior.
+- Made Visibility Studio runtime-only: Preview and Play now use the real nineteen animated capsule bindings, eight padded AABB corners, muzzle, viewing origins, smoke/HE rules, and native LOS order. The legacy fifteen-point editor, preset, import/export, rays, and static fallback were removed.
+- Centralized pinned Metamod, HL2SDK, AMBuild, VRF, and Steam Runtime 3 inputs in one dependency manifest. Shared Windows/Linux/SteamRT3 scripts now perform bootstrap, tests, ABI/import checks, and packaging for GitHub CI, GitLab CI, and local builds.
+- Preserved runtime visibility decisions, ordering, constants, performance behavior, ConVar names, package layout, and strict fail-open compatibility enforcement.
+
 ## 0.3.2
 
 - Updated strict Windows and Linux gamedata for CS2 build `24442510` (`1.41.7.3`).

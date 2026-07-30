@@ -20,7 +20,7 @@ It explains the intent of the code. The engine and file-format details are still
 
 **Hitbox capsule:** one of Valve's rounded three-dimensional player hit volumes. Nineteen animated capsules cover the runtime target body.
 
-**Axis-aligned bounding box (AABB):** the simple collision box copied with a player for validation and supporting calculations. Its corners are not runtime LOS targets.
+**Axis-aligned bounding box (AABB):** the player's copied collision box. Runtime checks its eight corners after padding the box 16 units sideways and 4 units upward.
 
 **Valve package (VPK):** the archive format containing CS2 maps and resources.
 
@@ -46,7 +46,9 @@ It explains the intent of the code. The engine and file-format details are still
 
 | Path | Job |
 | --- | --- |
-| `src/plugin/plugin.cpp` | Load/unload the plugin, register commands, execute its config, react to maps and frames, load valid bakes, and coordinate the other parts. |
+| `src/plugin/plugin.cpp` | Load/unload the plugin, react to maps and frames, load valid bakes, and coordinate the other parts. |
+| `src/plugin/settings.*` | Own every CS2FOW ConVar, transactional config load, committed settings snapshot, and administrator commands. |
+| `src/plugin/runtime_compatibility.*` | Parse gamedata and classify strict binary, AVX/OS, schema, layout, private-function, and optional capability checks. |
 | `src/plugin/game_state.cpp` | Read live CS2 players and visual groups on the game thread, then make copied worker snapshots. |
 | `src/plugin/visibility_worker.*` | Own the background thread, replace pending work with the newest snapshot, evaluate capsule visibility, and publish results. |
 | `src/plugin/transmit.cpp` | Apply lifecycle rules and visibility results to the paired primary/`dont_transmit` lists; keep quarantine and debug evidence state. |
@@ -64,7 +66,7 @@ It explains the intent of the code. The engine and file-format details are still
 | `src/core/subprocess.*` | Start external tools with argument lists, timeouts, cancellation, and captured output. |
 | `src/baker/` | Command-line bake sequence and physics-GLB import. |
 | `tests/` | Small assert-based tests grouped into map/BVH and visibility/transmit responsibilities. |
-| `tools/visibility_point_editor/` | Local browser Studio for editing LOS points and simulating the runtime's BVH8, movement, visibility, smoke, and HE behavior. |
+| `tools/visibility_point_editor/` | Local runtime-only Studio for simulating the native capsule/AABB LOS order, BVH8, movement, visibility, smoke, and HE behavior. |
 | `cfg/`, `gamedata/`, `data/` | Shipped settings, platform offsets, and optional map bakes. |
 
 ## Bake flow
@@ -82,14 +84,15 @@ The version 3 header is 256 bytes and records recipe version 1. Loading rejects 
 
 ## Map-load flow
 
-After registering convars during plugin load, and again at every map start, CS2FOW asks the server to execute `cfg/cs2fow.cfg`. The bundled file sets `sv_enable_donttransmit 0`; administrators can choose mode `1` because the transmit code maintains the paired lists required by that mode.
+After registering ConVars during plugin load, and again before every map worker starts, `settings.cpp` asks the server to execute `cfg/cs2fow.cfg`. The previous committed snapshot remains active while the file runs. Only the final `cs2fow_config_loaded` marker commits the candidate values; interruption, a missing marker, or the five-second timeout restores the previous snapshot. A second reload is rejected while one is pending.
 
 1. The Metamod map callback or game-frame check notices a new map.
-2. `change_map` stops the old worker and automatic baker, clears old map/transmit state, then asks the CS2 filesystem for mounted map-VPK candidates.
-3. `find_map_source` records the selected outer/nested source entry, CRC, and size.
-4. `load_bvh8` validates the installed bake. `load_map_bake` also requires the map name, source kind, CRC, and size to match the currently mounted source.
-5. A matching bake starts the visibility worker. A missing, old, damaged, or mismatched bake starts the low-priority external baker when its tools are present.
-6. While baking, or after any failure, `disabled_reason_` keeps transmit filtering off. A finished automatic bake is accepted only if the mounted source is still the same.
+2. `request_map_change` stops the old worker, starts the configuration transaction, and waits for commit or rollback.
+3. `change_map` clears old map/transmit state, then asks the CS2 filesystem for mounted map-VPK candidates. The configured worker-thread count is therefore fixed consistently for this map.
+4. `find_map_source` records the selected outer/nested source entry, CRC, and size.
+5. `load_bvh8` validates the installed bake. `load_map_bake` also requires the map name, source kind, CRC, and size to match the currently mounted source.
+6. A matching bake starts the visibility worker. A missing, old, damaged, or mismatched bake starts the low-priority external baker when its tools are present.
+7. While baking, or after any failure, `disabled_reason_` keeps transmit filtering off. A finished automatic bake is accepted only if the mounted source is still the same.
 
 This is why a Valve map update cannot silently reuse old wall geometry.
 
@@ -110,7 +113,8 @@ For each eligible living pair the worker:
 
 - makes five fixed recipient origins: eye, RTT-scaled left/right shoulders, eye plus 16 units, and feet;
 - adds one wall-clipped, RTT-scaled W/S or diagonal intention origin; pure A/D already uses the matching shoulder point;
-- projects the complete nineteen-capsule body into a target-fitted 32 by 32 CPU depth view, while keeping the held-weapon muzzle as a separate point;
+- reuses an active reveal hold, then tries the direct chest probe, eight AABB corners padded 16 units sideways and 4 units upward, and the held-weapon muzzle;
+- only when every cheap check is blocked, projects the complete nineteen-capsule body into a target-fitted 32 by 32 CPU depth view;
 - proves fully covered capsule regions hidden in batches, tests remaining capsule surface samples against baked walls and copied live smoke, and stops at the first open sample;
 - lets an HE clear only smoke that already existed when the detonation was recorded on the same game clock;
 - reuses the triangle packet that blocked the same pair's earlier muzzle ray, then traverses the BVH8 if needed;
@@ -167,7 +171,7 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 
 | Change | Start here | Keep in mind |
 | --- | --- | --- |
-| Valve capsule bindings, input origins, or muzzle sampling | `src/core/visibility_sampling.cpp` | Runtime capsule constants must continue to match the shared player VMDL hitboxes; Studio keeps its old point solver for comparison. |
+| Valve capsule bindings, AABB padding, input origins, or muzzle sampling | `src/core/visibility_sampling.cpp` | Keep the native and Studio runtime-alignment check synchronized; never add a static capture fallback. |
 | Capsule silhouette/depth evaluation | `src/core/capsule_visibility.cpp` | Preserve conservative sub-pixel handling, smoke/HE behavior, and fail-open deadlines. |
 | Player/schema field capture | `src/plugin/game_state.cpp` | Live engine reads remain on the game thread and uncertainty fails open. |
 | Visibility scheduling, muzzle cache, or reveal hold | `src/plugin/visibility_worker.cpp` | Worker input must stay pointer-free copied data. |
@@ -177,58 +181,33 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 | BVH traversal math | `src/core/bvh8.cpp` | Tests cover open/blocked rays and packet caching. |
 | BVH file layout | `src/core/bvh8_format.cpp` and `bvh8.h` | Validate before allocation and keep replacement atomic. |
 | Physics filtering/build recipe | `src/baker/glb_import.cpp`, `src/core/builder.cpp` | Recipe changes require an intentional format/recipe decision and new bakes. |
-| Operator settings/commands | `plugin.cpp`, `cfg/cs2fow.cfg`, `README.md` | Preserve the `cs2fow_*` public names. |
+| Operator settings/commands | `src/plugin/settings.*`, `cfg/cs2fow.cfg`, `README.md` | Preserve the `cs2fow_*` public names and keep the transaction marker last. |
+| Binary/schema/private API compatibility | `src/plugin/runtime_compatibility.*`, `gamedata/cs2fow.games.txt` | Preserve exact fingerprint enforcement and the required/optional capability boundary. |
 
 ## Build, test, package, and release
 
-The local default dependency layout is next to the repository:
+`build-dependencies.json` is the source of truth for the exact Metamod, HL2SDK, AMBuild, VRF, and Steam Runtime 3 inputs. Bootstrap stores ignored source dependencies under `.build-deps/`; GitHub and GitLab CI call the same scripts used locally.
 
-```text
-references/ambuild
-references/metamod-source
-references/hl2sdk-cs2
-```
-
-The exact CI commits are in `.github/workflows/build.yml` and `.gitlab-ci.yml`.
-
-Windows from a developer command prompt:
+Windows:
 
 ```powershell
-$env:PYTHONPATH = "..\references\ambuild"
-New-Item -ItemType Directory -Force build | Out-Null
-Set-Location build
-python ..\configure.py
-python -c "from ambuild2.run import cli_run; cli_run()"
-Set-Location ..
-.\build\cs2fow_tests\windows-x86_64\cs2fow_tests.exe
-python tools\visibility_point_editor\check_points.py
-python -m unittest -v tests\test_package.py
-node --check tools\visibility_point_editor\viewer.js
-python package.py windows-x86_64
+.\scripts\build-windows.ps1
 ```
 
-Linux must be built in Valve's pinned Steam Runtime 3 Sniper SDK container. The CI workflow configures `build-linux`, runs the same tests, checks the highest required `GLIBC`, `GLIBCXX`, and `CXXABI` versions, and then runs:
+Windows host to the pinned Steam Runtime 3 Linux container:
+
+```powershell
+.\scripts\build-steamrt3.ps1
+```
+
+Inside a Steam Runtime 3 Linux environment:
 
 ```sh
-python3 package.py linux-x86_64
+bash scripts/build-linux.sh
 ```
 
-For an official-map bundle, place each matching `.bvh8` and `.json` report under `data/maps`, then run:
+Each build script fetches exact dependencies, configures and compiles, runs native and SDK-independent tests, verifies Windows imports or SteamRT3 symbol versions, and produces the corresponding ignored `packages/` ZIP. `scripts/check_studio.py` runs runtime alignment, BVH8, movement, smoke, HE, and malformed-input checks.
 
-```sh
-python package.py official-maps
-```
+`package.py` takes the version from top-level `VERSION`. For official maps it asks `cs2fow_baker --inspect-bvh8` to validate every bake and requires matching report metadata. It also checks licenses, duplicate/unsafe ZIP entries, ZIP integrity, Linux modes, and checksums.
 
-`package.py` takes the version from top-level `VERSION`. For every official map it asks `cs2fow_baker --inspect-bvh8` to fully validate the bake, then requires the JSON report's map, source, and geometry metadata to match. It also checks required license files, duplicate/unsafe ZIP entries, ZIP integrity, Linux executable modes, and retains checksums for every current-version archive already built. A full three-target run refuses incomplete final output.
-
-Before preparing a release:
-
-1. update `VERSION` and `CHANGELOG.md` together;
-2. run Windows and Steam Runtime 3 Linux builds/tests;
-3. run the point-editor checks;
-4. bake and validate the intended maps from a recorded CS2 build;
-5. build all three ZIPs and verify their SHA-256 values;
-6. record build ID, bake recipe, fixed map list, and checksums in the release manifest; and
-7. draft release notes that clearly separate automated proof from live-server validation.
-
-Creating a tag, publishing a GitHub release, uploading archives, or deploying the Bake Service is a separate human approval step.
+Creating a tag, release manifest, release notes, public release, or Bake Service deployment remains a separate explicitly approved task.
