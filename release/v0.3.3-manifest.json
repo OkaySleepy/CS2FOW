@@ -1,0 +1,26 @@
+{
+  "version": "0.3.3",
+  "source_commit": "4c9c01c430a241c58ea426e0ad10f23dd08ac60e",
+  "cs2_app_id": 730,
+  "cs2_build_id": "24442510",
+  "cs2_version": "1.41.7.3",
+  "cs2_last_updated_unix": 1785285460,
+  "server_depots": {
+    "windows": {
+      "depot_id": 2347771,
+      "manifest_id": "5814144478477689230",
+      "binary_size": 32794264,
+      "binary_crc32": "0xa440c490"
+    },
+    "linux": {
+      "depot_id": 2347773,
+      "manifest_id": "56114211749641557",
+      "binary_size": 40326616,
+      "binary_crc32": "0xd276d339"
+    }
+  },
+  "artifacts": {
+    "cs2fow-0.3.3-windows-x86_64.zip": "8976109e67a71b56a9a881e43f0e8b6a75b657455f66ea6c469cf71011b82df9",
+    "cs2fow-0.3.3-linux-x86_64.zip": "c67c3086c20e22f7a09a15f171a26f10753c7c094f7e234585d4d88fff263684"
+  }
+}
