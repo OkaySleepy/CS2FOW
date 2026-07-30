@@ -113,7 +113,7 @@ def main() -> None:
   parser.add_argument("--platform", choices=("windows", "linux"), required=True)
   args = parser.parse_args()
   manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-  DEPENDENCIES.mkdir(exist_ok=True)
+  DEPENDENCIES.mkdir(parents=True, exist_ok=True)
   checkout("ambuild", manifest["ambuild"])
   checkout("metamod-source", manifest["metamod"])
   checkout("hl2sdk-manifests", manifest["hl2sdk_manifests"])

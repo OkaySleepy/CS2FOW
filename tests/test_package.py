@@ -111,6 +111,10 @@ class PackageTests(unittest.TestCase):
             self.assertRegex(action, r"^[0-9a-f]{40}$")
         self.assertIn(manifest["steamrt3_image"], github)
         self.assertIn(manifest["steamrt3_image"], gitlab)
+        self.assertIn(
+            "DEPENDENCIES.mkdir(parents=True, exist_ok=True)",
+            (package.ROOT / "scripts/bootstrap.py").read_text(encoding="utf-8"),
+        )
 
     def test_config_transaction_marker_is_last(self):
         lines = [
