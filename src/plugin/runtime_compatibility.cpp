@@ -174,6 +174,8 @@ bool runtime_compatibility::read_gamedata(const std::filesystem::path &path,
 	constexpr std::string_view recipient_key = "recipient_slot_offset_windows";
 	constexpr std::string_view server_size_key = "server_binary_size_windows";
 	constexpr std::string_view server_crc_key = "server_binary_crc32_windows";
+	constexpr std::string_view alternate_server_size_key = "server_binary_size_windows_alternate";
+	constexpr std::string_view alternate_server_crc_key = "server_binary_crc32_windows_alternate";
 	constexpr std::string_view entity_system_key = "game_entity_system_offset_windows";
 	constexpr std::string_view full_update_key = "checktransmit_full_update_offset_windows";
 	constexpr std::string_view smoke_volume_key = "smoke_volume_offset_windows";
@@ -192,6 +194,8 @@ bool runtime_compatibility::read_gamedata(const std::filesystem::path &path,
 	constexpr std::string_view recipient_key = "recipient_slot_offset_linux";
 	constexpr std::string_view server_size_key = "server_binary_size_linux";
 	constexpr std::string_view server_crc_key = "server_binary_crc32_linux";
+	constexpr std::string_view alternate_server_size_key = "server_binary_size_linux_alternate";
+	constexpr std::string_view alternate_server_crc_key = "server_binary_crc32_linux_alternate";
 	constexpr std::string_view entity_system_key = "game_entity_system_offset_linux";
 	constexpr std::string_view full_update_key = "checktransmit_full_update_offset_linux";
 	constexpr std::string_view smoke_volume_key = "smoke_volume_offset_linux";
@@ -221,7 +225,9 @@ bool runtime_compatibility::read_gamedata(const std::filesystem::path &path,
 			|| key == smoke_start_time_key;
 		const bool debug_key = key == create_entity_key || key == dispatch_spawn_key
 			|| key == remove_entity_key || key == teleport_key;
-		if (key != server_size_key && key != server_crc_key && key != recipient_key
+		if (key != server_size_key && key != server_crc_key
+			&& key != alternate_server_size_key && key != alternate_server_crc_key
+			&& key != recipient_key
 			&& key != entity_system_key && key != full_update_key
 			&& key != game_event_vtable_key && key != lookup_bone_key
 			&& key != get_bone_transform_key && !debug_key && !smoke_key)
@@ -241,8 +247,10 @@ bool runtime_compatibility::read_gamedata(const std::filesystem::path &path,
 			error = "invalid gamedata value for " + key;
 			return false;
 		}
-		if (key == server_size_key) server_binary_size_ = value;
-		if (key == server_crc_key) server_binary_crc32_ = value;
+		if (key == server_size_key) server_binary_fingerprints_[0].size = value;
+		if (key == server_crc_key) server_binary_fingerprints_[0].crc32 = value;
+		if (key == alternate_server_size_key) server_binary_fingerprints_[1].size = value;
+		if (key == alternate_server_crc_key) server_binary_fingerprints_[1].crc32 = value;
 		if (key == recipient_key) recipient_slot_offset_ = value;
 		if (key == entity_system_key) entity_system_offset_ = value;
 		if (key == full_update_key) transmit_offsets_.full_update_offset = value;
@@ -259,12 +267,19 @@ bool runtime_compatibility::read_gamedata(const std::filesystem::path &path,
 		if (key == remove_entity_key) remove_entity_rva_ = value;
 		if (key == teleport_key) teleport_vtable_index_ = value;
 	}
-	if (server_binary_size_ == 0 || server_binary_crc32_ == 0
+	if (server_binary_fingerprints_[0].size == 0
+		|| server_binary_fingerprints_[0].crc32 == 0
 		|| recipient_slot_offset_ == 0 || entity_system_offset_ == 0
 		|| transmit_offsets_.full_update_offset == 0 || lookup_bone_rva_ == 0
 		|| get_bone_transform_rva_ == 0)
 	{
 		error = "gamedata does not contain this platform's required values";
+		return false;
+	}
+	if ((server_binary_fingerprints_[1].size == 0)
+		!= (server_binary_fingerprints_[1].crc32 == 0))
+	{
+		error = "gamedata contains an incomplete alternate server fingerprint";
 		return false;
 	}
 	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo)
@@ -315,8 +330,15 @@ bool runtime_compatibility::verify_server_binary(
 	ISource2GameEntities *game_entities, std::string &error)
 {
 	std::ostringstream expected;
-	expected << "expected size=" << server_binary_size_ << " crc=0x"
-		<< std::hex << server_binary_crc32_;
+	expected << "expected";
+	const char *separator = " ";
+	for (const server_binary_fingerprint &fingerprint : server_binary_fingerprints_)
+	{
+		if (fingerprint.size == 0 || fingerprint.crc32 == 0) continue;
+		expected << separator << "size=" << std::dec << fingerprint.size << " crc=0x"
+			<< std::hex << fingerprint.crc32;
+		separator = " or ";
+	}
 	if (game_entities == nullptr)
 	{
 		error = "server game-entities interface is unavailable; " + expected.str()
@@ -340,12 +362,12 @@ bool runtime_compatibility::verify_server_binary(
 			+ "; " + expected.str() + ", actual unavailable";
 		return false;
 	}
-	if (actual_size != server_binary_size_ || actual_crc != server_binary_crc32_)
+	if (!matches_server_binary_fingerprint(
+		server_binary_fingerprints_, actual_size, actual_crc))
 	{
 		std::ostringstream message;
-		message << "server binary does not match verified gamedata: expected size="
-			<< server_binary_size_ << " crc=0x" << std::hex
-			<< server_binary_crc32_ << std::dec << ", actual size=" << actual_size
+		message << "server binary does not match verified gamedata: "
+			<< expected.str() << ", actual size=" << std::dec << actual_size
 			<< " crc=0x" << std::hex << actual_crc;
 		error = message.str();
 		return false;

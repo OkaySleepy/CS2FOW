@@ -2,7 +2,7 @@
 
 ## 0.3.3
 
-- Revalidated every private Windows and Linux gamedata value against the current public CS2 `1.41.7.3` binaries and refreshed the strict Linux fingerprint after Valve republished that depot without changing CS2FOW's required functions or layouts.
+- Revalidated every private Windows and Linux gamedata value against the current public CS2 `1.41.7.3` binaries. The strict gate now accepts both exact verified Linux files Valve distributed for that build, whose required functions and layouts are identical, while continuing to reject every unknown fingerprint.
 - Centralized every CS2FOW setting behind a committed runtime snapshot. `cs2fow.cfg` now loads transactionally, retains the previous known-good settings until its final marker, rolls back incomplete loads after five seconds, and defers worker-thread changes until the next map.
 - Added `cs2fow_help`, `cs2fow_reload`, `cs2fow_check_config`, and `cs2fow_metrics`. `cs2fow_status` is now a short operator dashboard with explicit health, configuration, map, protection, player/pair, p99, snapshot-age, and next-action information; the former detailed counters remain in `cs2fow_metrics`.
 - Extracted strict CS2/OS/AVX/gamedata/schema capability checks into a structured compatibility component without weakening the exact server-binary gate or fail-open behavior.

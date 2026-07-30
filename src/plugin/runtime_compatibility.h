@@ -3,6 +3,7 @@
 #include "runtime_compatibility_model.h"
 #include "transmit_masks.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -117,8 +118,7 @@ private:
 	uint32_t dispatch_spawn_rva_ {};
 	uint32_t remove_entity_rva_ {};
 	uint32_t teleport_vtable_index_ {};
-	uint32_t server_binary_size_ {};
-	uint32_t server_binary_crc32_ {};
+	std::array<server_binary_fingerprint, 2> server_binary_fingerprints_ {};
 	bool weapon_item_schema_available_ {};
 	bool smoke_schema_available_ {};
 	bool debug_beam_schema_available_ {};

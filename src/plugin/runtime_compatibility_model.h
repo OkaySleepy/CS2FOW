@@ -1,12 +1,33 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace cs2fow
 {
+
+struct server_binary_fingerprint
+{
+	uint32_t size {};
+	uint32_t crc32 {};
+};
+
+inline bool matches_server_binary_fingerprint(
+	std::span<const server_binary_fingerprint> accepted,
+	uint64_t actual_size, uint32_t actual_crc32)
+{
+	return std::any_of(accepted.begin(), accepted.end(),
+		[&](const server_binary_fingerprint &fingerprint)
+		{
+			return fingerprint.size != 0 && fingerprint.crc32 != 0
+				&& actual_size == fingerprint.size
+				&& actual_crc32 == fingerprint.crc32;
+		});
+}
 
 enum class compatibility_state : uint8_t
 {

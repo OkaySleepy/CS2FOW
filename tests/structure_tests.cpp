@@ -4,6 +4,7 @@
 #include "runtime_health.h"
 #include "settings_model.h"
 
+#include <array>
 #include <cassert>
 #include <chrono>
 
@@ -72,6 +73,16 @@ void run_structure_tests()
 	const compatibility_report error = make_compatibility_report(
 		compatibility_state::error, "schema unavailable");
 	assert(error.operator_action.find("metrics") != std::string::npos);
+	const std::array accepted_fingerprints {
+		server_binary_fingerprint {40326616, 3531002681},
+		server_binary_fingerprint {40324312, 3200273799}
+	};
+	assert(matches_server_binary_fingerprint(
+		accepted_fingerprints, 40326616, 3531002681));
+	assert(matches_server_binary_fingerprint(
+		accepted_fingerprints, 40324312, 3200273799));
+	assert(!matches_server_binary_fingerprint(
+		accepted_fingerprints, 40326616, 3200273799));
 	assert(std::string(runtime_health_state_name(
 		runtime_health_state::loading_configuration)) == "LOADING CONFIGURATION");
 	assert(std::string(runtime_health_state_name(
