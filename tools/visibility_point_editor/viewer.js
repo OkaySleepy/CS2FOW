@@ -1,20 +1,15 @@
-// Local browser editor for body points, generated axis-aligned box corners, and
-// a weapon-muzzle preview. It also reads baked BVH8 maps in a worker and shows
-// the runtime wall decisions without changing plugin state.
+// Local browser view of CS2FOW's runtime capsule, AABB, muzzle, smoke, HE, and
+// baked-wall decisions. It does not connect to a server or change plugin state.
 
 import * as THREE from "three";
 import {OrbitControls} from "three/addons/controls/OrbitControls.js";
-import {TransformControls} from "three/addons/controls/TransformControls.js";
 import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
 import {clone as clone_skeleton} from "three/addons/utils/SkeletonUtils.js";
 import {shoulder_offset} from "./bvh8.js";
 import {FPS_CONSTANTS, FPS_DT, target_muzzle, weapon_muzzle_length} from "./fps_runtime.js";
 
 const k_source_units_per_meter = 39.3700787;
-const k_default_preset = "default_sas_visibility_points.json";
 const k_aabb_color = 0x007c91;
-const k_body_color = 0xffffff;
-const k_selected_color = 0xdf1f2d;
 const k_muzzle_color = 0x92278f;
 const k_ray_color = 0xdf1f2d;
 const k_clear_ray_color = new THREE.Color(0x20a466);
@@ -28,8 +23,6 @@ const k_vertical_origin_offset = 16;
 const k_horizontal_bounds_padding = 16;
 const k_top_bounds_padding = 4;
 const k_aabb_dot_radius = 0.022 / 3.0;
-const k_body_dot_radius = 0.06 / 3.0;
-const k_selected_dot_radius = 0.088 / 3.0;
 const k_muzzle_dot_radius = 0.038 / 3.0;
 const k_animation_transition_seconds = 0.22;
 const k_debug_draw_interval = 1 / 16;
@@ -65,16 +58,6 @@ const k_weapon_muzzle_offsets = {
 	m4a1_silencer: {x: 36, y: 0, z: 0},
 	awp: {x: 52, y: 0, z: 0}
 };
-const k_runtime_body_bones = [
-	"head_0", "neck_0", "spine_3", "pelvis", "arm_upper_L",
-	"arm_upper_R", "leg_upper_L", "leg_upper_R", "leg_lower_L", "leg_lower_R",
-	"ankle_L", "ankle_R", "arm_lower_R", "arm_lower_L", "spine_2"
-];
-const k_skeleton_edges = [
-	[0, 1], [1, 2], [2, 14], [14, 3],
-	[1, 4], [4, 13], [1, 5], [5, 12],
-	[3, 6], [6, 8], [8, 10], [3, 7], [7, 9], [9, 11]
-];
 // Valve's current shared CS2 player hitbox set (Source units, bone-local).
 const k_valve_hitbox_capsules = [
 	["head_0", [-1, 1.8, 0], [3.5, 0.2, 0], 4.3],
@@ -204,50 +187,10 @@ const runtime_tuning = () => ({
 	shoulderRttScale: read_number("shoulder-rtt-scale"),
 	maxShoulder: read_number("shoulder-max")
 });
-const clone_point = (point) => ({name: point.name, x: Number(point.x), y: Number(point.y), z: Number(point.z)});
-const can_delete_point = (count) => count > 1;
-
-function unique_point_name(base)
-{
-	let name = base;
-	let suffix = 2;
-	while (points.some((point) => point.name === name))
-	{
-		name = `${base}_${suffix++}`;
-	}
-	return name;
-}
-
-function validated_points(value, label)
-{
-	if (value?.version !== 1 || value.coordinate_space !== "source_local" || value.model !== "ctm_sas")
-	{
-		throw new Error(`${label} has unsupported metadata`);
-	}
-	if (!Array.isArray(value.points) || !Number.isInteger(value.point_count)
-		|| value.point_count !== value.points.length || value.points.length < 1 || value.points.length > 32)
-	{
-		throw new Error(`${label} has an invalid point count`);
-	}
-	const names = new Set();
-	return value.points.map((point) =>
-	{
-		const copy = clone_point(point);
-		if (typeof copy.name !== "string" || !copy.name.trim() || names.has(copy.name)
-			|| !Number.isFinite(copy.x) || !Number.isFinite(copy.y) || !Number.isFinite(copy.z))
-		{
-			throw new Error(`${label} contains an invalid or duplicate point`);
-		}
-		names.add(copy.name);
-		return copy;
-	});
-}
-
 let renderer;
 let camera;
 let scene;
 let orbit;
-let transform;
 let loader;
 let model;
 let viewer_model;
@@ -257,7 +200,6 @@ let viewer_mixer;
 let model_animations = [];
 let viewer_animations = [];
 const masked_clip_cache = new WeakMap();
-let runtime_body_bindings = [];
 let runtime_animation_enabled = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let animation_clock;
 let manifest_models = {};
@@ -271,7 +213,6 @@ let bot_weapon_key = "";
 let bot_weapon_load_id = 0;
 const extra_bot_models = [];
 const extra_bot_mixers = [];
-const extra_bot_body_bindings = [];
 const extra_bot_capsule_bindings = [];
 const extra_bot_debug_groups = [];
 const extra_bot_capsule_groups = [];
@@ -298,12 +239,6 @@ const audio_buffers = new Map();
 const last_sound_choices = new Map();
 let last_player_step = 0;
 const last_bot_steps = [0, 0, 0];
-let points = [];
-let default_points = [];
-let selected_index = 0;
-let marker_group;
-let skeleton_group;
-let skeleton_lines;
 let hitbox_group;
 let hitbox_bindings = [];
 let hitbox_capsules_enabled = true;
@@ -448,28 +383,12 @@ function interpolate_pose(destination, from, to, amount, interpolateYaw = true)
 	destination.placed = true;
 }
 
-function point_vec(point)
-{
-	return {x: Number(point.x), y: Number(point.y), z: Number(point.z)};
-}
-
 function rotate_source(point, yaw_degrees)
 {
 	const yaw = degrees_to_radians(yaw_degrees);
 	const cosine = Math.cos(yaw);
 	const sine = Math.sin(yaw);
 	return {x: point.x * cosine - point.y * sine, y: point.x * sine + point.y * cosine, z: point.z};
-}
-
-function target_world_point(local)
-{
-	const rotated = rotate_source(local, target_pose.yaw);
-	return {x: target_pose.x + rotated.x, y: target_pose.y + rotated.y, z: target_pose.z + rotated.z};
-}
-
-function target_local_point(world)
-{
-	return rotate_source({x: world.x - target_pose.x, y: world.y - target_pose.y, z: world.z - target_pose.z}, -target_pose.yaw);
 }
 
 function pose_origin(pose)
@@ -539,8 +458,6 @@ function apply_player_transforms()
 	const viewerVisible = should_show_viewer_model(Boolean(map_metadata), viewer_pose.placed, play_active, play_third_person);
 	if (model) model.visible = targetVisible;
 	if (viewer_model) viewer_model.visible = viewerVisible;
-	marker_group.visible = targetVisible;
-	skeleton_group.visible = targetVisible;
 	hitbox_group.visible = hitbox_capsules_enabled && targetVisible;
 	for (let index = 0; index < extra_bot_capsule_groups.length; ++index)
 		extra_bot_capsule_groups[index].visible = hitbox_capsules_enabled && Boolean(extra_target_poses[index]?.placed);
@@ -588,22 +505,8 @@ function stationary_viewer_origins()
 
 function runtime_animation_active()
 {
-	return runtime_animation_enabled && points.length === k_runtime_body_bones.length
-		&& runtime_body_bindings.length === points.length;
-}
-
-function runtime_body_positions()
-{
-	if (!runtime_animation_active())
-	{
-		return points.map((point) => source_to_three(target_world_point(point_vec(point))));
-	}
-	model.updateWorldMatrix(true, true);
-	return points.map((point, index) =>
-	{
-		const binding = runtime_body_bindings[index];
-		return binding ? binding.bone.localToWorld(binding.offset.clone()) : source_to_three(target_world_point(point_vec(point)));
-	});
+	return runtime_animation_enabled
+		&& hitbox_bindings.length === k_valve_hitbox_capsules.length;
 }
 
 function muzzle_position()
@@ -630,10 +533,7 @@ function runtime_muzzle_position()
 
 function runtime_targets()
 {
-	const targets = [
-		...target_aabb_points().map(source_to_three),
-		...runtime_body_positions()
-	];
+	const targets = target_aabb_points().map(source_to_three);
 	const muzzle = runtime_muzzle_position();
 	if (muzzle)
 	{
@@ -973,34 +873,6 @@ function make_aabb_wire(points)
 	return lines;
 }
 
-function skeleton_vertices(positions)
-{
-	const vertices = [];
-	for (const [start, end] of k_skeleton_edges)
-	{
-		if (positions[start] && positions[end])
-		{
-			vertices.push(positions[start], positions[end]);
-		}
-	}
-	return vertices;
-}
-
-function draw_skeleton(positions)
-{
-	clear_group(skeleton_group);
-	const geometry = new THREE.BufferGeometry().setFromPoints(skeleton_vertices(positions));
-	const material = new THREE.LineBasicMaterial({
-		color: 0xffffff,
-		transparent: true,
-		opacity: read_number("point-opacity") * 0.9,
-		depthTest: false
-	});
-	skeleton_lines = new THREE.LineSegments(geometry, material);
-	skeleton_lines.renderOrder = 9;
-	skeleton_group.add(skeleton_lines);
-}
-
 function clear_group(group)
 {
 	while (group.children.length)
@@ -1127,12 +999,10 @@ function draw_muzzle_point()
 	muzzle_group.add(mesh);
 }
 
-function draw_points()
+function draw_runtime_preview()
 {
 	apply_player_transforms();
 	update_hitbox_capsules();
-	transform.detach();
-	clear_group(marker_group);
 	clear_group(aabb_group);
 
 	const aabb_points = target_aabb_points();
@@ -1142,23 +1012,6 @@ function draw_points()
 		aabb_group.add(make_marker(point, k_aabb_color, k_aabb_dot_radius));
 	}
 
-	const body_positions = runtime_body_positions();
-	draw_skeleton(body_positions);
-	for (let index = 0; index < body_positions.length; ++index)
-	{
-		const marker = make_position_marker(body_positions[index], index === selected_index ? k_selected_color : k_body_color, index === selected_index ? k_selected_dot_radius : k_body_dot_radius);
-		marker.userData.pointIndex = index;
-		marker_group.add(marker);
-		if (index === selected_index && !runtime_animation_active())
-		{
-			transform.attach(marker);
-		}
-	}
-
-	if (points.length === 0)
-	{
-		transform.detach();
-	}
 	draw_muzzle_point();
 	draw_runtime_rays();
 }
@@ -1169,13 +1022,7 @@ function update_animated_preview()
 	{
 		return;
 	}
-	const body_positions = runtime_body_positions();
 	update_hitbox_capsules();
-	for (let index = 0; index < Math.min(body_positions.length, marker_group.children.length); ++index)
-	{
-		marker_group.children[index].position.copy(body_positions[index]);
-	}
-	skeleton_lines?.geometry.setFromPoints(skeleton_vertices(body_positions));
 	const aabbPoints = target_aabb_points();
 	aabb_group.children[0]?.geometry.setFromPoints(aabb_vertices(aabbPoints));
 	for (let index = 0; index < Math.min(aabbPoints.length, aabb_group.children.length - 1); ++index)
@@ -1207,74 +1054,25 @@ function update_animated_preview()
 	}
 }
 
-function render_point_list()
-{
-	const list = $("points-list");
-	list.innerHTML = "";
-	for (let index = 0; index < points.length; ++index)
-	{
-		const point = points[index];
-		const row = document.createElement("button");
-		row.type = "button";
-		row.className = "point-row";
-		row.setAttribute("role", "option");
-		row.setAttribute("aria-selected", String(index === selected_index));
-		row.addEventListener("click", () => select_point(index));
-
-		const name = document.createElement("span");
-		name.className = "point-name";
-		name.textContent = point.name;
-		const coordinates = document.createElement("span");
-		coordinates.className = "point-coords";
-		coordinates.textContent = `${format_number(point.x)}, ${format_number(point.y)}, ${format_number(point.z)}`;
-		row.append(name, coordinates);
-		list.appendChild(row);
-	}
-}
-
-function render_selected_point()
-{
-	const point = points[selected_index];
-	const locked = runtime_animation_active();
-	for (const id of ["point-name", "point-x", "point-y", "point-z"])
-	{
-		$(id).disabled = !point || locked;
-	}
-	$("add-point").disabled = locked || points.length >= 32;
-	$("duplicate-point").disabled = locked || !point || points.length >= 32;
-	$("delete-point").disabled = locked || !can_delete_point(points.length);
-	$("reset-points").disabled = locked;
-	$("point-count").textContent = `${points.length} point${points.length === 1 ? "" : "s"}`;
-	$("point-name").value = point?.name ?? "";
-	$("point-x").value = point ? format_number(point.x) : "";
-	$("point-y").value = point ? format_number(point.y) : "";
-	$("point-z").value = point ? format_number(point.z) : "";
-}
-
-function render_point_editor()
-{
-	render_point_list();
-	render_selected_point();
-}
-
 function update_status()
 {
 	const runtimeWeapon = play_active ? $("bot-weapon-select").value : active_weapon_key;
 	const hasRuntimeMuzzle = weapon_muzzle_length(runtimeWeapon) > 0;
-	const bindingsReady = points.length === k_runtime_body_bones.length && runtime_body_bindings.length === points.length;
+	const bindingsReady = hitbox_bindings.length === k_valve_hitbox_capsules.length;
 	$("status-body-count").textContent = hitbox_bindings.length;
-	$("status-aabb-count").textContent = points.length;
-	$("status-target-count").textContent = hitbox_bindings.length + Number(hasRuntimeMuzzle);
+	$("status-aabb-count").textContent = k_aabb_edges.length === 12 ? 8 : 0;
+	$("status-target-count").textContent = hitbox_bindings.length + 8
+		+ Number(hasRuntimeMuzzle);
 	$("status-ray-count").textContent = ray_count;
 	$("status-origin-count").textContent = origin_group?.children.length || (map_metadata ? 0 : stationary_viewer_origins().length);
 	$("status-ray-result").textContent = map_metadata ? `${clear_ray_count}/${blocked_ray_count}` : "--";
 	$("status-wall-result").textContent = wall_visible === null ? (map_metadata ? "Place players" : "No map") : (wall_visible ? "Visible" : "Hidden");
 	$("status-wall-result").style.color = wall_visible === null ? "" : (wall_visible ? "#13784a" : "#b90f20");
 	$("status-muzzle").textContent = hasRuntimeMuzzle ? runtimeWeapon : "None";
-	$("status-selected").textContent = points[selected_index]?.name ?? "None";
-	$("status").textContent = status_extra || (model ? "Studio ready." : "Load a local SAS model to begin.");
+	$("status").textContent = status_extra || (bindingsReady
+		? "Studio ready." : "Runtime capsule capture unavailable; CS2FOW would fail open.");
 	$("model-status").textContent = model_status;
-	$("model-status").classList.toggle("ready", Boolean(model));
+	$("model-status").classList.toggle("ready", bindingsReady);
 	$("animation-clip").disabled = !bindingsReady;
 	$("runtime-animation").disabled = !bindingsReady;
 	for (const id of ["viewer-ping", "shoulder-base", "shoulder-rtt-scale", "shoulder-max",
@@ -1284,16 +1082,13 @@ function update_status()
 	}
 	$("play-mode").disabled = !play_ready();
 	$("runtime-animation").setAttribute("aria-pressed", String(runtime_animation_enabled && !play_active));
-	$("edit-mode").setAttribute("aria-pressed", String(!runtime_animation_enabled && !play_active));
 	$("play-mode").setAttribute("aria-pressed", String(play_active));
 }
 
 function update_scene()
 {
-	selected_index = points.length ? Math.min(Math.max(selected_index, 0), points.length - 1) : -1;
 	set_model_opacity();
-	draw_points();
-	render_point_editor();
+	draw_runtime_preview();
 	update_status();
 }
 
@@ -1349,7 +1144,7 @@ function write_pose_fields(role, pose)
 function update_player_poses()
 {
 	apply_player_transforms();
-	draw_points();
+	draw_runtime_preview();
 	update_placement_status();
 	update_status();
 }
@@ -1623,7 +1418,7 @@ async function load_surface_sidecar(mapName)
 
 function init_map_worker()
 {
-	map_worker = new Worker(new URL("./bvh8_worker.js?studio=37", import.meta.url), {type: "module"});
+	map_worker = new Worker(new URL("./bvh8_worker.js?studio=38", import.meta.url), {type: "module"});
 	map_worker.addEventListener("message", (event) =>
 	{
 		const message = event.data;
@@ -1772,41 +1567,6 @@ async function load_map_file(file)
 	}
 }
 
-function select_point(index)
-{
-	selected_index = points.length ? Math.min(Math.max(index, 0), points.length - 1) : -1;
-	update_scene();
-}
-
-function export_json()
-{
-	const export_points = validated_points({
-		version: 1,
-		coordinate_space: "source_local",
-		model: "ctm_sas",
-		point_count: points.length,
-		points
-	}, "current preset");
-	return JSON.stringify({
-		version: 1,
-		coordinate_space: "source_local",
-		model: "ctm_sas",
-		point_count: export_points.length,
-		points: export_points
-	}, null, "\t") + "\n";
-}
-
-function set_points(next_points)
-{
-	points = next_points.map(clone_point);
-	selected_index = 0;
-	if (!capture_runtime_body_bindings() && model)
-	{
-		runtime_animation_enabled = false;
-	}
-	update_scene();
-}
-
 function make_mixer(gltf, root)
 {
 	const mixer = new THREE.AnimationMixer(root);
@@ -1817,32 +1577,6 @@ function make_mixer(gltf, root)
 		mixer.setTime(0);
 	}
 	return mixer;
-}
-
-function capture_runtime_body_bindings()
-{
-	runtime_body_bindings = [];
-	if (!model || points.length !== k_runtime_body_bones.length)
-	{
-		return false;
-	}
-	model.position.copy(source_to_three(pose_origin(target_pose)));
-	model.rotation.set(0, degrees_to_radians(target_pose.yaw), 0);
-	model.updateWorldMatrix(true, true);
-	for (let index = 0; index < k_runtime_body_bones.length; ++index)
-	{
-		const bone = model.getObjectByName(k_runtime_body_bones[index]);
-		if (!bone)
-		{
-			runtime_body_bindings = [];
-			return false;
-		}
-		runtime_body_bindings.push({
-			bone,
-			offset: bone.worldToLocal(source_to_three(target_world_point(point_vec(points[index]))).clone())
-		});
-	}
-	return true;
 }
 
 function animation_choices()
@@ -2005,7 +1739,7 @@ function update_play_visibility()
 	if (viewer_model) viewer_model.visible = play_third_person;
 	if (player_weapon_mount) player_weapon_mount.visible = play_third_person;
 	if (viewmodel_root) viewmodel_root.visible = !play_third_person && !play_scoped;
-	for (const group of [marker_group, skeleton_group, aabb_group, muzzle_group, origin_group, nav_group])
+	for (const group of [aabb_group, muzzle_group, origin_group, nav_group])
 	{
 		if (group) group.visible = play_debug;
 	}
@@ -2891,7 +2625,6 @@ async function enter_play_mode()
 		runtime_animation_enabled = true;
 		play_nav = nav;
 		orbit.enabled = false;
-		transform.detach();
 		if (viewer_model) viewer_model.visible = false;
 		if (weapon_mount) weapon_mount.visible = false;
 		if (bot_weapon_mount) bot_weapon_mount.visible = true;
@@ -2996,27 +2729,18 @@ function leave_play_mode()
 	update_scene();
 }
 
-function set_runtime_mode(preview)
+function start_runtime_preview()
 {
 	leave_play_mode();
-	if (preview && !capture_runtime_body_bindings())
+	if (hitbox_bindings.length !== k_valve_hitbox_capsules.length)
 	{
-		status_extra = points.length === k_runtime_body_bones.length
-			? "Runtime preview unavailable: the loaded model is missing a required bone."
-			: "Runtime preview requires exactly 15 body points.";
+		status_extra = "Runtime capsule capture unavailable: the loaded model is missing a required bone. CS2FOW would fail open.";
 		update_status();
 		return;
 	}
-	runtime_animation_enabled = preview;
-	if (preview)
-	{
-		play_selected_animation();
-	}
-	else
-	{
-		show_standing_pose();
-	}
-	status_extra = preview ? "Runtime bone preview is active." : "Static point editing is active.";
+	runtime_animation_enabled = true;
+	play_selected_animation();
+	status_extra = "Runtime capsule preview is active.";
 	update_scene();
 }
 
@@ -3280,7 +3004,6 @@ function clear_extra_bots()
 	}
 	extra_bot_models.length = 0;
 	extra_bot_mixers.length = 0;
-	extra_bot_body_bindings.length = 0;
 	extra_bot_capsule_bindings.length = 0;
 	for (const group of extra_bot_capsule_groups) clear_group(group);
 }
@@ -3304,12 +3027,6 @@ function create_extra_bots()
 		bot.visible = true;
 		scene.add(bot);
 		extra_bot_models.push(bot);
-		const bindings = runtime_body_bindings.map((binding) =>
-		{
-			const bone = bot.getObjectByName(binding.bone.name);
-			return bone ? {bone, offset: binding.offset.clone(), position: new THREE.Vector3()} : null;
-		});
-		extra_bot_body_bindings.push(bindings.length === k_runtime_body_bones.length && bindings.every(Boolean) ? bindings : []);
 		const capsuleBindings = capsule_bindings_for(bot);
 		extra_bot_capsule_bindings.push(capsuleBindings);
 		for (const binding of capsuleBindings) extra_bot_capsule_groups[index].add(make_capsule_visual(binding));
@@ -3666,23 +3383,10 @@ async function load_bot_model_from_url(url)
 	apply_readable_materials(model, true);
 	scene.add(model);
 	model_mixer = make_mixer({animations: model_animations}, model);
-	capture_runtime_body_bindings();
 	rebuild_hitbox_capsules();
 	refresh_animation_choices();
 	apply_player_transforms();
 	return true;
-}
-
-async function load_preset(url)
-{
-	const response = await fetch(url, {cache: "no-store"});
-	if (!response.ok)
-	{
-		throw new Error(`${url}: ${response.status}`);
-	}
-	const value = await response.json();
-	default_points = validated_points(value, "default preset");
-	set_points(default_points);
 }
 
 async function load_model_from_url(url)
@@ -3720,8 +3424,9 @@ async function load_model_from_url(url)
 			apply_readable_materials(model, true);
 			scene.add(model);
 			model_mixer = make_mixer(gltf, model);
-			const animated = capture_runtime_body_bindings();
 			rebuild_hitbox_capsules();
+			const capsulesReady =
+				hitbox_bindings.length === k_valve_hitbox_capsules.length;
 			viewer_model = clone_skeleton(model);
 			viewer_animations = model_animations;
 			apply_readable_materials(viewer_model);
@@ -3738,10 +3443,12 @@ async function load_model_from_url(url)
 				show_standing_pose();
 			}
 			set_model_opacity();
-			model_status = "Model loaded";
-			status_extra = animated
-				? (runtime_animation_active() ? "SAS loaded. Runtime bone animation is active." : "SAS loaded. Static point editing is active.")
-				: "SAS loaded without the 15 runtime bones; using static points.";
+			model_status = capsulesReady ? "Model loaded" : "Runtime capture unavailable";
+			status_extra = capsulesReady
+				? (runtime_animation_active()
+					? "SAS loaded. Runtime capsule animation is active."
+					: "SAS loaded. A real capsule pose is frozen for reduced motion.")
+				: "SAS is missing required capsule bones. Runtime capture is unavailable and CS2FOW would fail open.";
 			update_scene();
 			resolve(true);
 		}, undefined, reject);
@@ -3799,16 +3506,6 @@ async function load_manifest()
 	}
 }
 
-function set_export_menu(open)
-{
-	$("export-menu").hidden = !open;
-	$("export-toggle").setAttribute("aria-expanded", String(open));
-	if (open)
-	{
-		$("copy-json").focus();
-	}
-}
-
 function update_range_labels()
 {
 	$("model-opacity-value").textContent = `${Math.round(read_number("model-opacity") * 100)}%`;
@@ -3824,7 +3521,6 @@ function install_ui()
 	{
 		button.addEventListener("click", () => $("sas-file").click());
 	}
-	$("import-los").addEventListener("click", () => $("import-json").click());
 	$("reset-camera").addEventListener("click", reset_camera);
 	$("reload-mirage").addEventListener("click", load_mirage);
 	$("load-map").addEventListener("click", () => $("map-file").click());
@@ -3923,11 +3619,10 @@ function install_ui()
 		{
 			play_selected_animation();
 		}
-		draw_points();
+		draw_runtime_preview();
 		update_status();
 	});
-	$("runtime-animation").addEventListener("click", () => set_runtime_mode(true));
-	$("edit-mode").addEventListener("click", () => set_runtime_mode(false));
+	$("runtime-animation").addEventListener("click", start_runtime_preview);
 	$("play-mode").addEventListener("click", enter_play_mode);
 	$("mouse-sensitivity").addEventListener("input", () =>
 	{
@@ -4005,144 +3700,6 @@ function install_ui()
 			update_scene();
 		});
 	}
-	$("point-name").addEventListener("input", (event) =>
-	{
-		if (points[selected_index])
-		{
-			points[selected_index].name = event.target.value;
-			render_point_list();
-			update_status();
-		}
-	});
-	for (const key of ["x", "y", "z"])
-	{
-		$(`point-${key}`).addEventListener("input", (event) =>
-		{
-			const value = Number(event.target.value);
-			if (points[selected_index] && Number.isFinite(value))
-			{
-				points[selected_index][key] = value;
-				draw_points();
-				render_point_list();
-				update_status();
-			}
-		});
-	}
-	$("add-point").addEventListener("click", () =>
-	{
-		if (points.length >= 32)
-		{
-			return;
-		}
-		let number = points.length + 1;
-		while (points.some((point) => point.name === `custom_${number}`))
-		{
-			++number;
-		}
-		points.push({name: `custom_${number}`, x: 0, y: 0, z: 36});
-		select_point(points.length - 1);
-	});
-	$("duplicate-point").addEventListener("click", () =>
-	{
-		if (!points.length || points.length >= 32)
-		{
-			return;
-		}
-		const copy = clone_point(points[selected_index]);
-		copy.name = unique_point_name(`${copy.name}_copy`);
-		points.splice(selected_index + 1, 0, copy);
-		select_point(selected_index + 1);
-	});
-	$("delete-point").addEventListener("click", () =>
-	{
-		if (!can_delete_point(points.length))
-		{
-			status_extra = "At least one LOS point is required.";
-			update_status();
-			return;
-		}
-		points.splice(selected_index, 1);
-		select_point(Math.min(selected_index, points.length - 1));
-	});
-	$("reset-points").addEventListener("click", () => set_points(default_points));
-	$("export-toggle").addEventListener("click", () => set_export_menu($("export-menu").hidden));
-	$("export-menu").addEventListener("keydown", (event) =>
-	{
-		const items = [$("copy-json"), $("download-json")];
-		const index = items.indexOf(document.activeElement);
-		if (event.key === "Escape")
-		{
-			event.preventDefault();
-			set_export_menu(false);
-			$("export-toggle").focus();
-		}
-		else if (event.key === "ArrowDown" || event.key === "ArrowUp")
-		{
-			event.preventDefault();
-			const direction = event.key === "ArrowDown" ? 1 : -1;
-			items[(index + direction + items.length) % items.length].focus();
-		}
-	});
-	document.addEventListener("pointerdown", (event) =>
-	{
-		if (!$("export-wrap").contains(event.target))
-		{
-			set_export_menu(false);
-		}
-	});
-	$("copy-json").addEventListener("click", async () =>
-	{
-		try
-		{
-			await navigator.clipboard.writeText(export_json());
-			status_extra = "Copied JSON to clipboard.";
-		}
-		catch (error)
-		{
-			status_extra = `Copy failed: ${error.message || error}`;
-		}
-		set_export_menu(false);
-		update_status();
-	});
-	$("download-json").addEventListener("click", () =>
-	{
-		try
-		{
-			const blob = new Blob([export_json()], {type: "application/json"});
-			const url = URL.createObjectURL(blob);
-			const anchor = document.createElement("a");
-			anchor.href = url;
-			anchor.download = "los_points_sas.json";
-			anchor.click();
-			URL.revokeObjectURL(url);
-			status_extra = "Downloaded LOS JSON.";
-		}
-		catch (error)
-		{
-			status_extra = `Download failed: ${error.message || error}`;
-		}
-		set_export_menu(false);
-		update_status();
-	});
-	$("import-json").addEventListener("change", async (event) =>
-	{
-		const file = event.target.files[0];
-		if (!file)
-		{
-			return;
-		}
-		try
-		{
-			const value = JSON.parse(await file.text());
-			set_points(validated_points(value, file.name));
-			status_extra = `Imported ${file.name}.`;
-		}
-		catch (error)
-		{
-			status_extra = `Import failed: ${error.message || error}`;
-		}
-		update_status();
-	});
 	update_range_labels();
 }
 
@@ -4522,11 +4079,6 @@ function install_picking()
 				mode: placement_mode, origin, target});
 			return;
 		}
-		const hit = raycaster.intersectObjects(marker_group.children, false)[0];
-		if (hit?.object?.userData?.pointIndex !== undefined)
-		{
-			select_point(hit.object.userData.pointIndex);
-		}
 	});
 }
 
@@ -4540,58 +4092,27 @@ function run_self_checks()
 			failures.push(message);
 		}
 	};
-	expect(default_points.length === 15, "default body point count");
-	expect(generated_aabb_points().length === 8, "AABB fallback count");
+	expect(k_valve_hitbox_capsules.length === 19, "runtime capsule count");
+	expect(k_valve_hitbox_capsules.every(([, start, end, radius]) =>
+		start.length === 3 && end.length === 3 && start.every(Number.isFinite)
+		&& end.every(Number.isFinite) && Number.isFinite(radius) && radius > 0),
+		"runtime capsule bindings");
+	expect(generated_aabb_points().length === 8, "runtime AABB count");
 	expect(generated_aabb_points()[0].x === -32 && generated_aabb_points()[7].z === 76, "runtime AABB padding");
 	const viewer_origins = stationary_viewer_origins();
 	expect(viewer_origins.length === 5 && viewer_origins[0].x === 256, "fixed viewer origins");
 	expect(new Set(viewer_origins.map((point) => `${point.x},${point.y},${point.z}`)).size === 5, "stationary origins are unique");
-	expect(viewer_origins.length * (default_points.length + generated_aabb_points().length) === 115, "stationary ray count");
-	const roundtrip = JSON.parse(export_json());
-	const imported = validated_points(roundtrip, "self-check round trip");
-	expect(roundtrip.points.length === points.length, "JSON round trip count");
-	expect(roundtrip.point_count === points.length, "JSON point count metadata");
-	expect(roundtrip.version === 1 && roundtrip.model === "ctm_sas", "JSON metadata");
-	expect(roundtrip.coordinate_space === "source_local", "JSON coordinate space");
-	expect(roundtrip.points.every((point, index) => point.name === points[index].name), "JSON point order");
-	expect(imported.every((point, index) => point.name === points[index].name), "validated import round trip");
-	expect(!can_delete_point(1) && can_delete_point(2), "final point protection");
-	for (const invalid of [
-		{...roundtrip, point_count: 0, points: []},
-		{...roundtrip, points: roundtrip.points.map((point, index) => ({...point, name: index === 0 ? " " : point.name}))},
-		{...roundtrip, points: roundtrip.points.map((point, index) => ({...point, name: index === 1 ? roundtrip.points[0].name : point.name}))},
-		{...roundtrip, points: roundtrip.points.map((point, index) => ({...point, x: index === 0 ? Infinity : point.x}))}
-	])
-	{
-		let rejected = false;
-		try { validated_points(invalid, "self-check"); } catch { rejected = true; }
-		expect(rejected, "invalid export rejection");
-	}
-	const previous_status = status_extra;
-	status_extra = "Export failed: self-check";
-	update_status();
-	expect($("status").textContent === status_extra, "visible export validation feedback");
-	status_extra = previous_status;
-	update_status();
-	expect($("points-list").querySelectorAll('[role="option"]').length === 15, "point list count");
-	expect($("point-name").value === points[selected_index]?.name, "selected point synchronization");
-	for (const id of ["load-sas", "import-los", "export-toggle", "animation-clip", "runtime-animation", "edit-mode", "play-mode", "points-list", "point-name", "inspector", "points-disclosure", "metrics-hud", "state-hud", "play-hud", "play-result", "play-rays", "play-smokes", "play-hes", "play-bot-count", "play-debug-state", "play-view", "play-blocker", "play-bvh", "player-primary-select", "load-map", "reload-mirage", "unload-map", "place-target", "place-viewer", "viewer-ping", "shoulder-base", "shoulder-rtt-scale", "shoulder-max", "visibility-hold-ms", "he-clear-radius", "he-clear-seconds", "simulation-seed", "mouse-sensitivity", "map-opacity", "map-focus", "map-wireframe", "frame-map", "frame-players", "hitbox-capsules"])
+	for (const id of ["load-sas", "animation-clip", "runtime-animation", "play-mode", "inspector", "metrics-hud", "state-hud", "play-hud", "play-result", "play-rays", "play-smokes", "play-hes", "play-bot-count", "play-debug-state", "play-view", "play-blocker", "play-bvh", "player-primary-select", "load-map", "reload-mirage", "unload-map", "place-target", "place-viewer", "viewer-ping", "shoulder-base", "shoulder-rtt-scale", "shoulder-max", "visibility-hold-ms", "he-clear-radius", "he-clear-seconds", "simulation-seed", "mouse-sensitivity", "map-opacity", "map-focus", "map-wireframe", "frame-map", "frame-players", "hitbox-capsules"])
 	{
 		expect(Boolean($(id)), `redesigned control: ${id}`);
 	}
-	expect(document.querySelectorAll("[data-scene-panel]").length === 5, "five inspector panels");
+	expect(document.querySelectorAll("[data-scene-panel]").length === 4, "four runtime inspector panels");
 	expect(document.querySelectorAll("[data-movement-button]").length === 4, "WASD controls");
 	expect(Boolean(map_worker), "BVH8 worker");
 	expect(k_debug_draw_interval === 1 / 16 && k_bvh_snapshot_interval === 1 / 16,
 		"16 Hz LOS and BVH debug geometry");
 	expect(shoulder_offset(0) === 48 && shoulder_offset(200) === 128, "runtime ping shoulder range");
 	expect(Object.keys(k_map_spawn_pairs).length === 6, "default map spawn pairs");
-	expect($("points-disclosure").open === false, "collapsed point list");
-	expect(k_runtime_body_bones.length === 15 && new Set(k_runtime_body_bones).size === 15, "runtime bone bindings");
-	expect(k_skeleton_edges.length === 14, "body skeleton edges");
-	expect(skeleton_group.children.length === 1
-		&& skeleton_lines?.geometry.getAttribute("position")?.count === k_skeleton_edges.length * 2,
-		"body skeleton geometry");
 	expect(k_animation_sets.default.length === 34, "base animation choices");
 	for (const [key, expected] of Object.entries({knife: 37, usp_silencer: 37, m4a1_silencer: 37, awp: 37, grenade: 38}))
 	{
@@ -4721,30 +4242,8 @@ function init_scene()
 	orbit.maxDistance = 80;
 	orbit.update();
 
-	transform = new TransformControls(camera, renderer.domElement);
-	transform.setMode("translate");
-	transform.setSize(0.58);
-	transform.addEventListener("dragging-changed", (event) => { orbit.enabled = !event.value; });
-	transform.addEventListener("objectChange", () =>
-	{
-		if (!points[selected_index])
-		{
-			return;
-		}
-		const value = target_local_point(three_to_source(transform.object.position));
-		points[selected_index].x = value.x;
-		points[selected_index].y = value.y;
-		points[selected_index].z = value.z;
-		draw_runtime_rays();
-		render_point_editor();
-		update_status();
-	});
-	scene.add(transform);
-
 	loader = new GLTFLoader();
 	animation_clock = new THREE.Clock();
-	marker_group = new THREE.Group();
-	skeleton_group = new THREE.Group();
 	hitbox_group = new THREE.Group();
 	aabb_group = new THREE.Group();
 	muzzle_group = new THREE.Group();
@@ -4759,7 +4258,7 @@ function init_scene()
 		extra_bot_debug_groups.push(new THREE.Group());
 		extra_bot_capsule_groups.push(new THREE.Group());
 	}
-	scene.add(ray_group, origin_group, aabb_group, skeleton_group, marker_group, muzzle_group, hitbox_group,
+	scene.add(ray_group, origin_group, aabb_group, muzzle_group, hitbox_group,
 		nav_group, smoke_group, grenade_group, effect_group, ...extra_bot_debug_groups, ...extra_bot_capsule_groups);
 	scene.add(new THREE.HemisphereLight(0xffffff, 0xc9cdd2, 2.4));
 	const key_light = new THREE.DirectionalLight(0xffffff, 3.2);
@@ -4848,7 +4347,6 @@ async function main()
 	install_play_controls();
 	install_picking();
 	animate();
-	await load_preset(k_default_preset);
 	run_self_checks();
 	load_manifest();
 	load_mirage();

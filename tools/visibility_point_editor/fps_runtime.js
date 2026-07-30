@@ -38,19 +38,6 @@ const DEFAULT_HE_SECONDS = 2.5;
 const BULLET_SMOKE_RADIUS = 28;
 const BULLET_SMOKE_SECONDS = 0.8;
 const GROUND_NORMAL_Z = Math.cos(FPS_CONSTANTS.maxSlopeDegrees * Math.PI / 180);
-const NATIVE_BODY_POINTS = Object.freeze([
-	[5.609201635493794, -1.4428278502142438, 64.2012733036622],
-	[2.0125293444485384, 2.7306012182339385, 59.938710028873956],
-	[0, 3.6606043089445834, 54], [-3.4531053226609565, 5.946114299110735, 38],
-	[6.649097464536467, 9.206736663527453, 61.50515964236403],
-	[-4.609436263442105, -6.65497499510368, 62.674399985034256],
-	[2.023447514568512, 12.575529525946793, 38.476983901746856], [-3.5065278282472674, -5.103061971464753, 38],
-	[11.492137476801554, 6, 22], [-4.297040890272927, -6, 22],
-	[11.870334433375513, 10.522994945593906, 4], [-11.849791908865742, -5, 4],
-	[0, -10.546890805234906, 51.22609251649996], [16.97650970898366, 6.7731795517149544, 51.74577989786342],
-	[-1.738377928258503, 4.30848079861881, 46.753597185311996]
-]);
-
 const add = (a, b) => ({x: a.x + b.x, y: a.y + b.y, z: a.z + b.z});
 const sub = (a, b) => ({x: a.x - b.x, y: a.y - b.y, z: a.z - b.z});
 const mul = (a, amount) => ({x: a.x * amount, y: a.y * amount, z: a.z * amount});
@@ -715,26 +702,6 @@ export function target_aabb(bot)
 		bot.origin.x - 32, bot.origin.y + 32, bot.origin.z + height + 4,
 		bot.origin.x + 32, bot.origin.y + 32, bot.origin.z + height + 4
 	]);
-}
-
-export function default_targets(bot, muzzleLength = 0)
-{
-	const height = target_height(bot);
-	const local = [
-		[-32, -32, 0], [32, -32, 0], [-32, 32, 0], [32, 32, 0],
-		[-32, -32, height + 4], [32, -32, height + 4], [-32, 32, height + 4], [32, 32, height + 4],
-		...NATIVE_BODY_POINTS
-	];
-	if (muzzleLength > 0) local.push([muzzleLength, 0, 60]);
-	const values = new Float32Array(local.length * 3);
-	local.forEach((point, index) =>
-	{
-		const world = index < 8
-			? {x: bot.origin.x + point[0], y: bot.origin.y + point[1], z: bot.origin.z + point[2]}
-			: target_world_point(bot, point);
-		values.set([world.x, world.y, world.z], index * 3);
-	});
-	return values;
 }
 
 function valid_target_set(value, targetOrigin = null)

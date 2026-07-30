@@ -1,6 +1,5 @@
 <!doctype html>
-<!-- Local-only line-of-sight point editor. It reads ignored model assets and
-     one preset; it does not connect to a server or change runtime state. -->
+<!-- Local-only view of the real CS2FOW runtime inputs and LOS ordering. -->
 <html lang="en">
 <head>
 	<meta charset="utf-8">
@@ -203,38 +202,8 @@
 		.button.danger {
 			color: var(--red-dark);
 		}
-		.export-wrap {
-			position: relative;
-		}
-		.export-menu {
-			position: absolute;
-			z-index: 30;
-			top: calc(100% + 8px);
-			right: 0;
-			width: 168px;
-			padding: 6px;
-			border: 1px solid var(--line);
-			border-radius: 14px;
-			background: rgba(255, 255, 255, 0.97);
-			box-shadow: 0 20px 46px rgba(35, 39, 45, 0.16);
-		}
-		.export-menu[hidden], .inspector-panel[hidden] {
+		.inspector-panel[hidden] {
 			display: none;
-		}
-		.export-menu button {
-			width: 100%;
-			min-height: 35px;
-			padding: 0 10px;
-			border: 0;
-			border-radius: 9px;
-			background: transparent;
-			text-align: left;
-			font-size: 11px;
-			font-weight: 650;
-			cursor: pointer;
-		}
-		.export-menu button:hover, .export-menu button:focus-visible {
-			background: #f1f2f3;
 		}
 		.inspector {
 			position: fixed;
@@ -351,7 +320,7 @@
 		.grid-3 .field {
 			margin-bottom: 9px;
 		}
-		.inline-actions, .point-actions {
+		.inline-actions {
 			display: flex;
 			gap: 6px;
 		}
@@ -383,99 +352,9 @@
 		.inline-actions {
 			margin-top: 10px;
 		}
-		.inline-actions .button, .point-actions .button {
+		.inline-actions .button {
 			flex: 1;
 			padding: 0 7px;
-		}
-		.point-actions {
-			margin-top: 12px;
-		}
-		.point-actions .button {
-			min-height: 32px;
-			font-size: 9px;
-		}
-		.count-badge {
-			padding: 5px 8px;
-			border-radius: 999px;
-			background: #eceef0;
-			color: var(--muted);
-			font-size: 10px;
-			font-weight: 720;
-			white-space: nowrap;
-		}
-		.point-disclosure {
-			border: 1px solid var(--line);
-			border-radius: 16px;
-			background: rgba(255, 255, 255, 0.52);
-			overflow: hidden;
-		}
-		.point-disclosure summary {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-			gap: 12px;
-			min-height: 46px;
-			padding: 0 13px;
-			list-style: none;
-			font-size: 11px;
-			font-weight: 720;
-			cursor: pointer;
-		}
-		.point-disclosure summary::-webkit-details-marker {
-			display: none;
-		}
-		.point-disclosure summary::after {
-			content: "+";
-			margin-left: auto;
-			color: var(--muted);
-			font-size: 17px;
-			font-weight: 400;
-		}
-		.point-disclosure[open] summary::after {
-			content: "–";
-		}
-		.points-list {
-			max-height: 282px;
-			overflow: auto;
-			padding: 4px 6px 7px;
-			border-top: 1px solid var(--line);
-			background: rgba(240, 242, 244, 0.46);
-		}
-		.point-row {
-			width: 100%;
-			min-height: 37px;
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: center;
-			gap: 9px;
-			padding: 6px 8px;
-			border: 1px solid transparent;
-			border-radius: 10px;
-			background: transparent;
-			text-align: left;
-			cursor: pointer;
-			transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
-		}
-		.point-row:hover {
-			background: rgba(255, 255, 255, 0.76);
-		}
-		.point-row[aria-selected="true"] {
-			border-color: rgba(229, 29, 46, 0.2);
-			background: #fff;
-			color: var(--red-dark);
-		}
-		.point-name {
-			overflow: hidden;
-			font-size: 11px;
-			font-weight: 720;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
-		.point-coords {
-			color: var(--quiet);
-			font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-			font-size: 8px;
-			white-space: nowrap;
 		}
 		.hud {
 			position: fixed;
@@ -707,9 +586,6 @@
 			.section-block {
 				padding: 12px;
 			}
-			.points-list {
-				max-height: 210px;
-			}
 		}
 		@media (prefers-reduced-motion: reduce) {
 			*, *::before, *::after {
@@ -727,28 +603,18 @@
 			<span class="brand-mark" aria-hidden="true"></span>
 			<div>
 				<div class="brand-name">CS2FOW Visibility Studio</div>
-				<div class="brand-subtitle">LOS Point Editor</div>
+				<div class="brand-subtitle">Runtime Visibility Studio</div>
 			</div>
 		</div>
 		<div class="mode-switch" role="group" aria-label="Studio mode">
 			<button id="runtime-animation" type="button" aria-pressed="false" disabled>Preview</button>
-			<button id="edit-mode" type="button" aria-pressed="true">Edit</button>
 			<button id="play-mode" type="button" aria-pressed="false" disabled>Play</button>
 		</div>
 		<div class="top-actions">
 			<button id="reset-camera" class="button" type="button">Reset Camera</button>
 			<button id="load-sas" class="button" type="button">Load Model</button>
-			<button id="import-los" class="button" type="button">Import LOS</button>
-			<div id="export-wrap" class="export-wrap">
-				<button id="export-toggle" class="button primary" type="button" aria-haspopup="menu" aria-expanded="false">Export</button>
-				<div id="export-menu" class="export-menu" role="menu" aria-label="Export LOS points" hidden>
-					<button id="copy-json" type="button" role="menuitem">Copy JSON</button>
-					<button id="download-json" type="button" role="menuitem">Download JSON</button>
-				</div>
-			</div>
 		</div>
 		<input id="sas-file" class="hidden-file" type="file" accept=".glb,.gltf">
-		<input id="import-json" class="hidden-file" type="file" accept=".json,application/json">
 		<input id="map-file" class="hidden-file" type="file" accept=".bvh8,application/octet-stream">
 	</header>
 
@@ -760,36 +626,13 @@
 			</div>
 		</div>
 		<nav class="inspector-tabs" aria-label="Inspector sections">
-			<button type="button" data-scene-tab="points" aria-pressed="true">Points</button>
-			<button type="button" data-scene-tab="model" aria-pressed="false">Model</button>
+			<button type="button" data-scene-tab="model" aria-pressed="true">Model</button>
 			<button type="button" data-scene-tab="weapon" aria-pressed="false">Weapon</button>
 			<button type="button" data-scene-tab="bounds" aria-pressed="false">Bounds</button>
 			<button type="button" data-scene-tab="map" aria-pressed="false">Map</button>
 		</nav>
 		<div class="inspector-body">
-			<section class="inspector-panel" data-scene-panel="points">
-				<div class="section-block" aria-labelledby="selected-point-title">
-					<h2 id="selected-point-title">Selected point</h2>
-					<label class="field"><span>Name</span><input id="point-name" type="text" autocomplete="off"></label>
-					<div class="grid-3">
-						<label class="field"><span>X</span><input id="point-x" type="number" step="0.25"></label>
-						<label class="field"><span>Y</span><input id="point-y" type="number" step="0.25"></label>
-						<label class="field"><span>Z</span><input id="point-z" type="number" step="0.25"></label>
-					</div>
-					<div class="point-actions">
-						<button id="add-point" class="button" type="button">Add</button>
-						<button id="duplicate-point" class="button" type="button">Duplicate</button>
-						<button id="delete-point" class="button danger" type="button">Delete</button>
-						<button id="reset-points" class="button" type="button">Reset</button>
-					</div>
-				</div>
-				<details id="points-disclosure" class="point-disclosure">
-					<summary><span>All LOS points</span><span id="point-count" class="count-badge">0 points</span></summary>
-					<div id="points-list" class="points-list" role="listbox" aria-label="Editable LOS points"></div>
-				</details>
-			</section>
-
-			<section class="inspector-panel" data-scene-panel="model" hidden>
+			<section class="inspector-panel" data-scene-panel="model">
 				<div class="section-block">
 					<h2>Runtime preview</h2>
 					<label class="field"><span>Player animation</span>
@@ -802,7 +645,7 @@
 				<div class="section-block">
 					<h2>Visibility</h2>
 					<label class="field"><span>Model opacity <output id="model-opacity-value">80%</output></span><input id="model-opacity" type="range" min="0.1" max="1" step="0.05" value="0.8"></label>
-					<label class="field"><span>Point opacity <output id="point-opacity-value">100%</output></span><input id="point-opacity" type="range" min="0.25" max="1" step="0.05" value="1"></label>
+					<label class="field"><span>Debug opacity <output id="point-opacity-value">100%</output></span><input id="point-opacity" type="range" min="0.25" max="1" step="0.05" value="1"></label>
 					<div class="inline-actions"><button id="hitbox-capsules" class="button primary" type="button" aria-pressed="true">Valve hitboxes</button></div>
 				</div>
 				<div class="section-block">
@@ -875,7 +718,7 @@
 			<section class="inspector-panel" data-scene-panel="bounds" hidden>
 				<div class="section-block">
 					<h2>Collision bounds</h2>
-					<p class="hint">Eight runtime AABB fallback points come from these bounds. They use 16-unit side and 4-unit top padding and are not exported.</p>
+					<p class="hint">Eight runtime AABB checks come from these bounds with 16-unit side and 4-unit top padding.</p>
 					<h2>Minimum</h2>
 					<div class="grid-3">
 						<label class="field"><span>X</span><input id="min-x" type="number" value="-16" step="1"></label>
@@ -968,14 +811,13 @@
 
 	<div id="metrics-hud" class="hud metrics-hud glass" aria-label="Visibility metrics">
 		<div class="metric"><strong id="status-body-count">19</strong><span>capsules</span></div>
-		<div class="metric"><strong id="status-aabb-count">15</strong><span>legacy pts</span></div>
-		<div class="metric"><strong id="status-target-count">20</strong><span>runtime parts</span></div>
+		<div class="metric"><strong id="status-aabb-count">8</strong><span>AABB points</span></div>
+		<div class="metric"><strong id="status-target-count">28</strong><span>runtime targets</span></div>
 		<div class="metric"><strong id="status-ray-count">0</strong><span>rays</span></div>
 		<div class="metric"><strong id="status-origin-count">5</strong><span>origins</span></div>
 		<div class="metric"><strong id="status-ray-result">--</strong><span>clear/blocked</span></div>
 		<div class="metric"><strong id="status-wall-result">No map</strong><span>wall result</span></div>
 		<div class="metric"><strong id="status-muzzle">None</strong><span>muzzle</span></div>
-		<div class="metric"><strong id="status-selected">None</strong><span>selected</span></div>
 		<div class="coordinate-note">Source units · X forward/back · Y left/right · Z up</div>
 	</div>
 	<div id="state-hud" class="hud state-hud glass" aria-label="Studio status">

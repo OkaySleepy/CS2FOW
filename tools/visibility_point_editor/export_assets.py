@@ -520,7 +520,7 @@ def export_nav_graphs(vrf: Path, game: Path) -> dict[str, str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Export the local CS2 SAS GLB for the CS2FOW LOS point editor.")
+    parser = argparse.ArgumentParser(description="Export local CS2 assets for CS2FOW Runtime Visibility Studio.")
     parser.add_argument("--game", required=True, type=Path, help="Path to game/csgo")
     parser.add_argument("--vrf", type=Path, default=default_vrf(), help="Path to Source2Viewer-CLI")
     args = parser.parse_args()

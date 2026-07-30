@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {
-	default_targets, FPS_CONSTANTS, FPS_DT, FpsSimulation, make_test_smoke, move_actor,
+	FPS_CONSTANTS, FPS_DT, FpsSimulation, make_test_smoke, move_actor,
 	resolve_capsule, route_between, smoke_line_blocked, target_aabb, target_muzzle, trace_capsule_target,
 	validate_nav, weapon_muzzle_length
 } from "./fps_runtime.js";
@@ -20,7 +20,7 @@ const wall = {
 
 const nativeWorker = readFileSync(new URL("../../src/plugin/visibility_worker.cpp", import.meta.url), "utf8");
 const nativeCapsules = readFileSync(new URL("../../src/core/capsule_visibility.h", import.meta.url), "utf8");
-const nativePlugin = readFileSync(new URL("../../src/plugin/plugin.cpp", import.meta.url), "utf8");
+const nativeSettings = readFileSync(new URL("../../src/plugin/settings.cpp", import.meta.url), "utf8");
 const nativeSampling = readFileSync(new URL("../../src/core/visibility_sampling.cpp", import.meta.url), "utf8");
 const nativeSamplingHeader = readFileSync(new URL("../../src/core/visibility_sampling.h", import.meta.url), "utf8");
 const nativeRaster = readFileSync(new URL("../../src/core/capsule_visibility.cpp", import.meta.url), "utf8");
@@ -33,12 +33,17 @@ assert.match(nativeWorker, /k_visibility_probe_capsule\s*=\s*4/,
 	"Studio's chest probe must be reviewed when the native probe capsule changes");
 assert.match(nativeWorker, /pair_started < revealed_until_\[recipient\]\[target\]/,
 	"Studio's hold short-circuit must be reviewed when native hold reuse changes");
-assert.ok(nativeWorker.indexOf("for (const vec3 &point : aabb_points)")
-	< nativeWorker.indexOf("capsule_visible_from_origin(*data_"),
-	"native runtime must keep cheap AABB rays before capsule rasterization");
+const holdOrder = nativeWorker.indexOf("pair_started < revealed_until_");
+const chestOrder = nativeWorker.indexOf("capsule_midpoint(to.capsules[k_visibility_probe_capsule])");
+const aabbOrder = nativeWorker.indexOf("for (const vec3 &point : aabb_points)");
+const muzzleOrder = nativeWorker.indexOf("if (has_muzzle)");
+const capsuleOrder = nativeWorker.indexOf("capsule_visible_from_origin(*data_");
+assert.ok(holdOrder < chestOrder && chestOrder < aabbOrder && aabbOrder < muzzleOrder
+	&& muzzleOrder < capsuleOrder,
+	"native runtime order must remain hold, chest, AABB, muzzle, capsules");
 assert.match(nativeCapsules, /k_capsule_occluder_cache_size\s*=\s*96/,
 	"Studio's proof cache must be reviewed when native capacity changes");
-assert.match(nativePlugin, /cs2fow_visibility_hold_ms[^\n]+47, true, 0, true, 1000/,
+assert.match(nativeSettings, /cs2fow_visibility_hold_ms[\s\S]{0,160}\b47, true, 0, true, 1000/,
 	"Studio's reveal-hold control must match the shipped native default and range");
 for (const [source, pattern, name] of [
 	[nativeSamplingHeader, /k_visibility_pixel_grid_size\s*=\s*32/, "32x32 visibility grid"],
@@ -321,21 +326,17 @@ assert.deepEqual(nav.objectives.b, {x: 256, y: 64, z: 0});
 assert.equal(route_between(nav, {x: 0, y: 0, z: 0}, {x: 256, y: 0, z: 0}).length, 2);
 assert.throws(() => validate_nav({version: 1, areas: [{id: 1, corners: [], connections: []}]}), /invalid/i);
 
-const nativeTargets = default_targets({origin: {x: 10, y: 20, z: 30}, yaw: 90, crouched: false}, weapon_muzzle_length("m4a1_silencer"));
-assert.equal(nativeTargets.length / 3, 24, "an armed target should include AABB, body, and muzzle points");
-assert.ok(Math.abs(nativeTargets[24] - 11.442827850214244) < 0.001 && Math.abs(nativeTargets[25] - 25.609201635493794) < 0.001,
-	"native fallback body points must rotate with target yaw");
+const standingAabb = target_aabb({origin: {x: 10, y: 20, z: 30}, yaw: 90, crouched: false});
+assert.equal(standingAabb.length, 24, "runtime target must include eight AABB corners");
+assert.deepEqual(Array.from(standingAabb.slice(0, 3)), [-22, -12, 30],
+	"runtime AABB must use 16-unit side padding");
 const nativeMuzzle = target_muzzle({origin: {x: 10, y: 20, z: 30}, yaw: 90, crouched: false}, 36);
 assert.ok(Math.abs(nativeMuzzle.x - 10) < 0.001 && Math.abs(nativeMuzzle.y - 56) < 0.001 && nativeMuzzle.z === 90);
 const interpolatedMuzzle = target_muzzle({origin: {x: 0, y: 0, z: 0}, yaw: 0, height: 54}, 36);
 assert.ok(interpolatedMuzzle.z > 38 && interpolatedMuzzle.z < 60, "interpolated stance height must move the muzzle smoothly");
-const crouchedTargets = default_targets({origin: {x: 0, y: 0, z: 0}, yaw: 0, crouched: true});
-assert.equal(crouchedTargets[14], FPS_CONSTANTS.crouchedHeight + 4, "crouched AABB must use the simulated live hull");
-const preset = JSON.parse(readFileSync(new URL("./default_sas_visibility_points.json", import.meta.url), "utf8"));
-const fallbackTargets = default_targets({origin: {x: 0, y: 0, z: 0}, yaw: 0, crouched: false});
-assert.ok(preset.points.every((point, index) => [point.x, point.y, point.z].every((value, axis) =>
-	Math.abs(fallbackTargets[(index + 8) * 3 + axis] - value) < 0.0001)),
-	"worker fallback body points must match the compiled Studio preset");
+const crouchedAabb = target_aabb({origin: {x: 0, y: 0, z: 0}, yaw: 0, crouched: true});
+assert.equal(crouchedAabb[14], FPS_CONSTANTS.crouchedHeight + 4,
+	"crouched AABB must use the simulated live hull");
 
 const simulation = new FpsSimulation(openMap, {
 	viewer: {x: -300, y: 0, z: 0.02, yaw: 0},
