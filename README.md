@@ -1,6 +1,6 @@
 <div align="center">
 
-# CS2FOW
+<img src="docs/cs2fow-logo.png" width="760" alt="CS2FOW">
 
 ### Server-side anti-wallhack for Counter-Strike 2 community servers
 
