@@ -25,7 +25,7 @@ Every map gets a lightweight 3D copy of its solid walls. CS2FOW uses that copy t
 <tr>
 <td width="50%" align="center">
 <img src="docs/ancient.gif" width="100%" alt="CS2FOW hiding players behind solid map geometry on Ancient"><br>
-<strong>Ancient &mdash; solid geometry</strong>
+<strong>Ancient &mdash; A site</strong>
 </td>
 <td width="50%" align="center">
 <img src="docs/smokeandhegrenade.gif" width="100%" alt="CS2FOW hiding players behind smoke and revealing them through an HE-cleared opening"><br>
