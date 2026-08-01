@@ -157,6 +157,7 @@ The debug buffer is a small history kept in server memory. It records only game 
 | Setting | Default | Meaning |
 | --- | ---: | --- |
 | `sv_enable_donttransmit` | `0` | Choose how CS2 marks network entities that should not be sent. CS2FOW supports both modes and defaults to the safer compatibility mode. |
+| `mp_playerid` | `1` | Show target IDs for teammates only, preventing enemy names from appearing over a hidden player's stale client position. |
 | `cs2fow_enable` | `1` | Turn filtering on whenever all required data passes its safety checks. |
 | `cs2fow_smoke_occlusion` | `1` | Let live smoke block sight. If CS2FOW cannot safely read the smoke data, smoke steps aside while wall protection keeps working. |
 | `cs2fow_he_clear_radius_units` | `100` | Set how wide an HE-opened viewing channel is. Use `0` to turn HE clearing off. |

@@ -5,6 +5,7 @@
 // the worker receives copied snapshots, and uncertain state must fail open.
 
 #include "automatic_baker.h"
+#include "fire_bullets_filter.h"
 #include "lifecycle_guard.h"
 #include "map_source.h"
 #include "runtime_compatibility.h"
@@ -16,6 +17,7 @@
 #include <ISmmPlugin.h>
 #include <eiface.h>
 #include <entity2/entitysystem.h>
+#include <engine/igameeventsystem.h>
 #include <filesystem.h>
 #include <iserver.h>
 #include <igameevents.h>
@@ -135,6 +137,8 @@ public:
 	void hook_game_frame(bool simulating, bool first_tick, bool last_tick);
 	void hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &,
 		const Entity2Networkable_t **, const uint16 *, int);
+	void hook_post_event(CSplitScreenSlot slot, bool local_only, int client_count, const uint64 *clients,
+		INetworkMessageInternal *event, const CNetMessage *data, unsigned long size, NetChannelBufType_t buffer_type);
 	int hook_load_events_from_file(const char *filename, bool search_all);
 	void FireGameEvent(IGameEvent *event) override;
 	void print_status() const;
@@ -199,11 +203,13 @@ private:
 	ConVarRef teammates_are_enemies_;
 	IFileSystem *filesystem_ {};
 	IGameEventManager2 *game_events_ {};
+	IGameEventSystem *game_event_system_ {};
 	game_resource_service *game_resource_ {};
 	runtime_compatibility compatibility_;
 	int game_frame_hook_id_ {};
 	int check_transmit_hook_id_ {};
 	int game_event_load_hook_id_ {};
+	int fire_bullets_hook_id_ {};
 	std::string map_;
 	std::string pending_map_;
 	std::string disabled_reason_ {"no map loaded"};
@@ -217,6 +223,7 @@ private:
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
+	std::array<uint64_t, k_max_players> hidden_fire_bullets_recipients_ {};
 	std::array<target_transmit_cache, k_max_players> transmit_target_cache_;
 	std::array<player_bone_cache, k_max_players> player_bone_cache_;
 	mutable std::mutex transmit_state_mutex_;

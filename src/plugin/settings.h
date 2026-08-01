@@ -26,5 +26,6 @@ bool cancel_load();
 bool loading();
 
 bool donttransmit_mode(int &value);
+bool playerid_mode(int &value);
 
 } // namespace cs2fow::settings

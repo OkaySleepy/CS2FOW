@@ -3,6 +3,7 @@
 #include "runtime_compatibility_model.h"
 #include "runtime_health.h"
 #include "settings_model.h"
+#include "fire_bullets_filter.h"
 
 #include <array>
 #include <cassert>
@@ -94,4 +95,11 @@ void run_structure_tests()
 	assert(std::string(runtime_health_state_name(runtime_health_state::update_required)) == "UPDATE REQUIRED");
 	assert(std::string(runtime_health_state_name(runtime_health_state::unsupported_system)) == "UNSUPPORTED SYSTEM");
 	assert(std::string(runtime_health_state_name(runtime_health_state::error)) == "ERROR");
+
+	const fire_bullets_recipient_split shots = split_fire_bullets_recipients(0b1111, 0b1010);
+	assert(shots.normal == 0b0101);
+	assert(shots.sanitized == 0b1010);
+	const fire_bullets_recipient_split unrelated = split_fire_bullets_recipients(0b0011, 0b1100);
+	assert(unrelated.normal == 0b0011);
+	assert(unrelated.sanitized == 0);
 }

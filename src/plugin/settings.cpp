@@ -253,6 +253,22 @@ bool donttransmit_mode(int &value)
 	return true;
 }
 
+bool playerid_mode(int &value)
+{
+	value = 0;
+	if (config_cvar == nullptr)
+	{
+		return false;
+	}
+	const ConVarRef reference = config_cvar->FindConVar("mp_playerid");
+	if (!reference.IsValidRef())
+	{
+		return false;
+	}
+	value = CConVarRef<int>(reference).Get();
+	return true;
+}
+
 } // namespace settings
 
 CON_COMMAND_F(cs2fow_status, "Show concise CS2FOW health and protection state", FCVAR_NONE)
