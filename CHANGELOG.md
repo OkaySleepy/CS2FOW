@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.3.3
+
+- Revalidated every private Windows and Linux gamedata value against the current public CS2 `1.41.7.3` binaries. The strict gate now accepts both exact verified Linux files Valve distributed for that build, whose required functions and layouts are identical, while continuing to reject every unknown fingerprint.
+- Centralized every CS2FOW setting behind a committed runtime snapshot. `cs2fow.cfg` now loads transactionally, retains the previous known-good settings until its final marker, rolls back incomplete loads after five seconds, and defers worker-thread changes until the next map.
+- Added `cs2fow_help`, `cs2fow_reload`, `cs2fow_check_config`, and `cs2fow_metrics`. `cs2fow_status` is now a short operator dashboard with explicit health, configuration, map, protection, player/pair, p99, snapshot-age, and next-action information; the former detailed counters remain in `cs2fow_metrics`.
+- Extracted strict CS2/OS/AVX/gamedata/schema capability checks into a structured compatibility component without weakening the exact server-binary gate or fail-open behavior.
+- Made Visibility Studio runtime-only: Preview and Play now use the real nineteen animated capsule bindings, eight padded AABB corners, muzzle, viewing origins, smoke/HE rules, and native LOS order. The legacy fifteen-point editor, preset, import/export, rays, and static fallback were removed.
+- Centralized pinned Metamod, HL2SDK, AMBuild, VRF, and Steam Runtime 3 inputs in one dependency manifest. Shared Windows/Linux/SteamRT3 scripts now perform bootstrap, tests, ABI/import checks, and packaging for GitHub CI, GitLab CI, and local builds.
+- Increased the default reveal hold to 1000 ms to cover brief LOS gaps such as the CT-to-T angle through Dust II mid doors; operators can still tune it with `cs2fow_visibility_hold_ms`.
+- Made Valve's full nineteen-capsule silhouette the primary LOS decision. The eight padded AABB corners and weapon muzzle are now forgiving fallbacks when the capsule silhouette is fully blocked; the redundant chest probe was removed.
+- Preserved runtime ConVar names, package layout, and strict fail-open compatibility enforcement.
+
+## 0.3.2
+
+- Updated strict Windows and Linux gamedata for CS2 build `24442510` (`1.41.7.3`).
+- Rebuilt against the latest HL2SDK `159cddd`; Metamod:Source remains current at `2667e8e`.
+
+## 0.3.1
+
+- Restored eight padded AABB corner checks as a fast, forgiving visibility fallback before the full animated-capsule test. The runtime now tries reveal-hold reuse, chest, AABB corners, muzzle, and finally capsules, so an obvious visible point avoids the more expensive capsule pass.
+- Increased the default reveal hold from 16 ms to 47 ms (about three 64-tick server ticks) to reduce edge flicker and short pop-outs.
+- Added the AABB corner samples to the temporary in-game LOS debug view and aligned Visibility Studio with the runtime's current LOS order, padding, hold, cache, validation, and pose behavior.
+- Rebuilt against Metamod:Source `2667e8e` and HL2SDK `c9e9477` while retaining Steam Runtime 3 compatibility.
+
+## 0.3.0
+
+- Replaced the fifteen hand-tuned runtime LOS dots and eight AABB corners with Valve's nineteen live animated hitbox capsules. Visibility now evaluates the capsule silhouette through a bounded CPU depth buffer, preserves the muzzle/smoke/HE rules, and fails open on invalid capture, uncertainty, or a 75 ms worker budget.
+- Added a configurable 1-4-thread visibility pool (two by default), fair budget rotation, a safe visible-ray prepass, reveal-hold reuse, and a larger verified occluder cache that compacts proven blocker sets for 32-player servers. Status now separates wall latency from aggregate worker activity and reports recent tail latency, prepass, hold, and cache behavior.
+
+## 0.2.6-preview
+
+- Removed the private CS2 debug-overlay calls that could corrupt the client HUD and spam missing-texture errors.
+
+## 0.2.5-preview
+
+- Made all fifteen tuned body samples follow each player's current animation. If CS2 cannot provide a safe pose, visibility falls back to the existing fixed samples.
+- Added a separate `bones` line to `cs2fow_status` for the game-thread cost of capturing animated body points and the current animated/fallback player counts.
+- Made visibility and automatic-baker startup fail open when their worker threads cannot be created, and made large BVH8 loads cancellable so map changes and shutdown do not wait on obsolete work.
+- Reduced repeated runtime work by calculating each player's target samples once per cycle, skipping smoke capture when disabled, rejecting smoke volumes outside a ray early, listing each VPK once, and using a table-based streaming CRC32.
+- Retried unavailable bone lookups, checked POSIX process setup failures, preserved native Windows paths and empty process arguments, and limited AVX code generation to the ray-traversal functions that require it.
+- Tightened VPK source-path parsing, retained useful direct/nested lookup errors, and preserved native path encoding for temporary files and Unicode GLB/BVH8 paths.
+- Expanded Visibility Studio from a point editor into a local 64 Hz first-person runtime simulator with direct BVH8 loading, map collision, navigation, bots, weapons, grenades, smoke, HE and bullet clearing, sounds, particles, and Real/Debug visibility.
+- Made Studio use the runtime's animated body samples, AABB corners, muzzle point, ping-scaled viewing origins, wall decisions, smoke decisions, and ray counts; added interpolation for actors, grenades, LOS points, skeletons, AABBs, and debug geometry.
+- Added 16 Hz LOS/BVH diagnostics, consistent depth-independent debug overlays, per-bot visibility-gate counts, and a 33% orange BVH fill with a 16% black outline.
+- Added a pinned local Studio asset pipeline, compact player-animation exports, CS2 navigation export, optional baker surface sidecars, and automated checks for BVH8 traversal, movement, collision, smoke, HE, navigation, and runtime-layout consistency.
+- Removed generated .NET `bin`/`obj` output from version control, ignored future generated output, and pinned Studio's Node dependencies.
+- Pointed project and release downloads to the temporary GitLab home.
+
+## 0.2.4-preview
+
+- Rebuilt against the current Metamod:Source and HL2SDK so CS2FOW commands and settings register correctly after the July 17 CS2 tooling update.
+- Tightened the upper eye origin from 24 to 16 units and changed ping preload to a 48-128 unit table: every 25 ms adds 10 units until the 200 ms cap. AABB side/top padding remains 8 units.
+- Automatically treat every other living player as an enemy when `mp_teammates_are_enemies 1` is active.
+- Reduced the lifecycle fail-open window from 3 seconds to 1 second and removed the separate 1.5-second visual warmup while preserving the complete-group baseline check.
+- Updated Visibility Studio with a second SAS model 256 units away and the same stationary origins, target samples, and ray count used by the runtime.
+- Replaced velocity/lookahead prediction with a ping-scaled W/S/diagonal intention origin, added a permanent feet origin, and reduced rays by 37.5% to 62.5% per player pair (from 192-384 to 120-144).
+
+## 0.2.3-preview
+
+- Verified that CS2 build `24248951` keeps the same private runtime layout and updated the strict Windows/Linux server fingerprints.
+- Rebaked `cs_shelter`, `de_boulder`, `de_eldorado`, and `de_fachwerk` after their mounted map sources changed in the same update.
+
 ## 0.2.2-preview
 
 - Verified the private runtime layout and updated the strict Windows/Linux fingerprints for CS2 build `24209309`.

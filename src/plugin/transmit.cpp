@@ -97,7 +97,7 @@ void plugin::withhold_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *prim
 	{
 		return;
 	}
-	const bool debug = cs2fow_debug.Get();
+	const bool debug = settings::current().debug;
 	for (size_t entity = 0; entity < group.count; ++entity)
 	{
 		const CEntityHandle handle = group.handles[entity];
@@ -135,8 +135,21 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 		}
 	}
 	he_clearance_history_.clear();
+	player_bone_cache_.fill({});
 	capture_timing_ = {};
+	bone_timing_ = {};
 	transmit_timing_ = {};
+<<<<<<< HEAD
+<<<<<<< HEAD
+	never_opened_pairs_ = 0;
+=======
+	capsule_players_ = 0;
+	capsule_failed_players_ = 0;
+>>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
+=======
+	capsule_players_ = 0;
+	capsule_failed_players_ = 0;
+>>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 	if (clear_debug_records)
 	{
 		recent_hides_.clear();
@@ -145,7 +158,7 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 
 void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int)
 {
-	if (!cs2fow_enable.Get() || !disabled_reason_.empty() || infos == nullptr || count <= 0 || count > static_cast<int>(k_max_players))
+	if (!settings::current().enable || !disabled_reason_.empty() || infos == nullptr || count <= 0 || count > static_cast<int>(k_max_players))
 	{
 		return;
 	}
@@ -160,12 +173,12 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	for (int i = 0; i < count; ++i)
 	{
 		CCheckTransmitInfo *info = infos[i];
-		if (info == nullptr || !read_checktransmit_full_update(info, transmit_offsets_.full_update_offset))
+		if (info == nullptr || !read_checktransmit_full_update(info, compatibility_.transmit_offsets().full_update_offset))
 		{
 			continue;
 		}
 		int slot = -1;
-		std::memcpy(&slot, reinterpret_cast<const char *>(info) + recipient_slot_offset_, sizeof(slot));
+		std::memcpy(&slot, reinterpret_cast<const char *>(info) + compatibility_.recipient_slot_offset(), sizeof(slot));
 		if (slot < 0 || slot >= static_cast<int>(k_max_players))
 		{
 			continue;
@@ -175,7 +188,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			hidden_group_clear(group);
 		}
 	}
-	if (!result || !visibility_snapshot_fresh(result->captured, now, 0.0f))
+	if (!result || !visibility_snapshot_fresh(result->captured, now))
 	{
 		record_timing();
 		return;
@@ -211,6 +224,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			cache.group_key = make_current_visual_group_key(cache.group);
 		}
 	}
+	uint32_t never_opened_pairs = 0;
 	for (int i = 0; i < count; ++i)
 	{
 		CCheckTransmitInfo *info = infos[i];
@@ -225,10 +239,10 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			continue;
 		}
 		int slot = -1;
-		std::memcpy(&slot, reinterpret_cast<const char *>(info) + recipient_slot_offset_, sizeof(slot));
-		if (slot < 0 || slot >= static_cast<int>(k_max_players) || read_checktransmit_full_update(info, transmit_offsets_.full_update_offset)
+		std::memcpy(&slot, reinterpret_cast<const char *>(info) + compatibility_.recipient_slot_offset(), sizeof(slot));
+		if (slot < 0 || slot >= static_cast<int>(k_max_players) || read_checktransmit_full_update(info, compatibility_.transmit_offsets().full_update_offset)
 			|| !result->players[slot].valid
-			|| !visibility_snapshot_fresh(result->captured, now, result->recipient_lookahead_seconds[slot]))
+			|| !visibility_snapshot_fresh(result->captured, now))
 		{
 			continue;
 		}
@@ -255,22 +269,33 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			const bool full_group_marked = cache.group_valid && group_fully_marked(system, info->m_pTransmitEntity, cache.group);
 			if (cache.group_valid)
 			{
-				update_pair_visual_group(guard, cache.group_key, now, k_pair_baseline_warmup);
+				update_pair_visual_group(guard, cache.group_key);
+<<<<<<< HEAD
+			}
+			// Past its warmup but still never seen fully open: hiding for this pair
+			// stays permanently disallowed until group_fully_marked succeeds once while
+			// visible. Counted here so cs2fow_status can surface it instead of this
+			// looking like filtering silently doing nothing.
+			if (guard.initialized && now >= guard.fail_open_until && !guard.baseline_opened)
+			{
+				++never_opened_pairs;
+=======
+>>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 			}
 			if (result->visible[slot][target])
 			{
 				if (full_group_marked)
 				{
-					pair_note_open(guard, now, result->sequence);
+					pair_note_open(guard, result->sequence);
 					hidden_group_clear(stored_group);
 				}
 				continue;
 			}
-			if (!pair_allows_hiding(guard, now, result->sequence))
+			if (!pair_allows_hiding(guard, result->sequence))
 			{
 				if (full_group_marked)
 				{
-					pair_note_open(guard, now, result->sequence);
+					pair_note_open(guard, result->sequence);
 					hidden_group_clear(stored_group);
 				}
 				continue;
@@ -287,6 +312,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			withhold_group(system, info->m_pTransmitEntity, dont_transmit, cache.group, slot, hide_reason::current, now);
 		}
 	}
+	never_opened_pairs_ = never_opened_pairs;
 	record_timing();
 }
 
@@ -314,7 +340,7 @@ void plugin::print_entities(int edict)
 		return left->last_seen > right->last_seen;
 	});
 	META_CONPRINTF("[CS2FOW] entity debug recording=%s records=%zu filter=%s\n",
-		cs2fow_debug.Get() ? "on" : "off", count, edict < 0 ? "all" : "edict");
+		settings::current().debug ? "on" : "off", count, edict < 0 ? "all" : "edict");
 	for (size_t index = 0; index < count; ++index)
 	{
 		const recent_hide_log::record_type &record = *matches[index];

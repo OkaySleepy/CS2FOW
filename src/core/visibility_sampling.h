@@ -1,8 +1,7 @@
 #pragma once
 
-// Plain copied player input and the line-of-sight sampling API. The background
-// worker receives current movement/body/weapon values and gets bounded recipient
-// and target points without touching live CS2 objects.
+// Plain copied player input plus recipient-origin and muzzle sampling. Animated
+// Valve hitbox capsules are captured on the game thread and consumed as values.
 
 #include "bvh8.h"
 
@@ -12,9 +11,18 @@
 namespace cs2fow
 {
 
-inline constexpr uint32_t k_visibility_origin_count = 8;
-inline constexpr uint32_t k_visibility_target_count_max = 48;
-inline constexpr uint32_t k_visibility_ray_count_max = k_visibility_origin_count * k_visibility_target_count_max;
+inline constexpr uint32_t k_visibility_origin_count_max = 6;
+inline constexpr uint32_t k_visibility_capsule_count = 19;
+inline constexpr uint32_t k_visibility_aabb_point_count = 8;
+inline constexpr uint32_t k_visibility_pixel_grid_size = 32;
+inline constexpr uint32_t k_visibility_pixel_count = k_visibility_pixel_grid_size * k_visibility_pixel_grid_size;
+inline constexpr uint32_t k_visibility_debug_beam_count_max =
+	k_visibility_capsule_count + 1 + k_visibility_aabb_point_count;
+
+inline constexpr uint64_t k_visibility_button_forward = 0x8;
+inline constexpr uint64_t k_visibility_button_back = 0x10;
+inline constexpr uint64_t k_visibility_button_left = 0x200;
+inline constexpr uint64_t k_visibility_button_right = 0x400;
 
 enum class weapon_muzzle_class : uint8_t
 {
@@ -25,44 +33,65 @@ enum class weapon_muzzle_class : uint8_t
 	sniper
 };
 
+struct visibility_capsule
+{
+	vec3 start;
+	vec3 end;
+	float radius {};
+};
+
 struct visibility_player
 {
 	vec3 eye;
 	vec3 origin;
-	vec3 velocity;
 	vec3 mins;
 	vec3 maxs;
 	float eye_yaw_degrees {};
 	float rtt_seconds {};
+	uint64_t movement_buttons {};
 	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
+	std::array<visibility_capsule, k_visibility_capsule_count> capsules {};
+	uint32_t capsule_count {};
 };
+
+struct visibility_capsule_binding
+{
+	const char *bone;
+	vec3 local_start;
+	vec3 local_end;
+	float radius;
+};
+
+struct visibility_bone_transform
+{
+	vec3 position;
+	float rotation[4] {};
+};
+
+extern const std::array<visibility_capsule_binding, k_visibility_capsule_count> k_visibility_capsule_bindings;
 
 struct visibility_tuning
 {
-	uint32_t base_lookahead_ms {75};
-	float rtt_lookahead_scale {1.5f};
-	uint32_t max_lookahead_ms {375};
-	float max_prediction_units {96.0f};
-	float shoulder_base_units {24.0f};
-	float shoulder_rtt_scale {0.64f};
+	float shoulder_base_units {48.0f};
+	float shoulder_rtt_scale {0.4f};
 	float max_shoulder_units {128.0f};
 };
 
-struct visibility_target_points
+struct visibility_origin_points
 {
-	std::array<vec3, k_visibility_target_count_max> points {};
+	std::array<vec3, k_visibility_origin_count_max> points {};
 	uint32_t count {};
 };
 
-float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility_tuning &tuning);
 float visibility_shoulder_offset_units(float rtt_seconds, const visibility_tuning &tuning);
-vec3 visibility_prediction_offset(vec3 velocity, float seconds, float max_prediction_units);
 vec3 visibility_clip_destination(const bvh8_data &data, vec3 origin, vec3 destination);
 weapon_muzzle_class weapon_muzzle_class_from_item_definition(uint16_t item_definition);
 float weapon_muzzle_length(weapon_muzzle_class value);
-std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player,
-	float lookahead_seconds, const visibility_tuning &tuning);
-visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player,
-	float lookahead_seconds, float max_prediction_units);
+bool visibility_transform_point(const visibility_bone_transform &transform, vec3 local, vec3 &world);
+bool valid_visibility_capsule(const visibility_capsule &capsule);
+visibility_origin_points visibility_origins(const bvh8_data &data, const visibility_player &player,
+	const visibility_tuning &tuning);
+bool visibility_muzzle_point(const visibility_player &player, vec3 &point);
+std::array<vec3, k_visibility_aabb_point_count> visibility_aabb_points(const visibility_player &player);
 
 } // namespace cs2fow

@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,10 @@ REPORT = {
 
 
 class PackageTests(unittest.TestCase):
+    def test_readme_does_not_link_release_binaries(self):
+        urls = re.findall(r'https?://[^\s)"<>]+', (package.ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertFalse([url for url in urls if "/releases/" in url or re.search(r"\.(?:zip|exe|dll|so)(?:$|[?#])", url)])
+
     def test_map_pair_metadata_must_match_inspected_bake(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -87,6 +92,38 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(all(path.is_file() for path in package.LICENSE_FILES))
         self.assertEqual(len(package.VRF_FILES["win64"]), 5)
         self.assertEqual(len(package.VRF_FILES["linux64"]), 4)
+
+    def test_build_inputs_are_pinned_and_ci_uses_shared_scripts(self):
+        manifest = json.loads((package.ROOT / "build-dependencies.json").read_text(encoding="utf-8"))
+        for dependency in ("ambuild", "metamod", "hl2sdk_manifests", "hl2sdk"):
+            self.assertRegex(manifest[dependency]["commit"], r"^[0-9a-f]{40}$")
+        self.assertRegex(manifest["vrf"]["windows"]["sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(manifest["vrf"]["linux"]["sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(manifest["steamrt3_image"], r"@sha256:[0-9a-f]{64}$")
+
+        github = (package.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        gitlab = (package.ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+        self.assertIn("scripts/build-windows.ps1", github)
+        self.assertIn("scripts/build-linux.sh", github)
+        self.assertIn("scripts/build-linux.sh", gitlab)
+        self.assertIn("scripts/check_studio.py", gitlab)
+        for action in re.findall(r"uses:\s*[^@\s]+@([^\s]+)", github):
+            self.assertRegex(action, r"^[0-9a-f]{40}$")
+        self.assertIn(manifest["steamrt3_image"], github)
+        self.assertIn(manifest["steamrt3_image"], gitlab)
+        self.assertIn(
+            "DEPENDENCIES.mkdir(parents=True, exist_ok=True)",
+            (package.ROOT / "scripts/bootstrap.py").read_text(encoding="utf-8"),
+        )
+
+    def test_config_transaction_marker_is_last(self):
+        lines = [
+            line.strip()
+            for line in (package.ROOT / "cfg/cs2fow.cfg").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("//")
+        ]
+        self.assertEqual(lines[-1], "cs2fow_config_loaded")
+        self.assertEqual(lines.count("cs2fow_config_loaded"), 1)
 
 
 if __name__ == "__main__":

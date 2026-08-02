@@ -1,56 +1,53 @@
-# CS2FOW Visibility Studio
+# CS2FOW Runtime Visibility Studio
 
-Local-only LOS Point Editor for tuning CS2FOW target samples against the exported CS2 SAS model. It opens directly as a fixed desktop workspace: scene controls are on the left, editable points are on the right, and file actions are in the top bar.
+Visibility Studio is a local browser view of CS2FOW's runtime visibility rules. The old fifteen-point editor has been removed; Preview and Play now use the same nineteen Valve capsule bindings, eight padded AABB corners, muzzle point, viewing origins, LOS order, smoke/HE rules, defaults, and fail-open boundary as the plugin.
 
-The editor shows:
+The Studio shows:
 
-- the local SAS GLB model
-- optional USP-S, M4A1-S, and AWP previews attached to the right hand
-- 8 generated axis-aligned bounding box (AABB) fallback points
-- 15 editable body LOS points
-- one dynamic weapon muzzle point when a weapon is selected
+- local CT SAS and Phoenix models with real exported animation clips;
+- nineteen animated hitbox capsules driven by the runtime bone bindings;
+- eight AABB corners padded 16 units sideways and 4 units upward;
+- the held weapon's separate runtime muzzle point;
+- direct BVH8 map loading, collision walls, viewing origins, and actual debug rays; and
+- a 64 Hz first-person range with movement, navigation, weapons, smoke, HE clearing, sounds, and Runtime LOS/Debug views.
 
-It does not load maps, bounding volume hierarchy (BVH8) files, rays, hit triangles, or runtime worker state. Valve model exports are local assets and must not be committed.
+The raw LOS order is reveal-hold reuse, the nineteen-capsule silhouette, eight padded AABB corners, then muzzle. The capsule stage uses the same compact front-to-back occluder proofs, target-fitted 32-by-32 depth view, smoke tests, and 75 ms fail-open budget as runtime. The plugin uses Intel MaskedOcclusionCulling while Studio uses a scalar JavaScript rasterizer with matching constants and conservative boundaries, so edge pixels are representative rather than guaranteed bit-identical.
 
-## Export Local Assets
+Required model bones or capsule bindings are never replaced with invented points. If capture is incomplete, Studio reports that runtime capture is unavailable and would fail open. Reduced-motion preference freezes a valid real capsule pose.
+
+Studio smoke is geometry-aware test input rendered with locally exported CS2 artwork; it is not Valve's live particle simulation. Studio also does not imitate server-only thread scheduling, lifecycle, stale-snapshot, full-update, quarantine, team, or transmit-list safeguards. Those safeguards can reveal a target but cannot make the browser hide one.
+
+## Play controls
+
+Click **Play**, then click the canvas to capture the mouse. Use `W/A/S/D` to move, `Shift` to walk, `Ctrl` to crouch, and `Space` to jump. Press `1` for the selected primary, `2` for the USP-S, `3` for the Karambit, and `4` for Smoke/HE. Use left/right click for weapon actions, `R` to reload, `F` to inspect, `J` for first/third person, `V` for Runtime LOS/Debug, `C` for debug rays, and `Escape` to release the mouse.
+
+## Export local assets
+
+Install Node.js, Python, and the .NET 10 SDK, then run:
 
 ```powershell
+npm ci --prefix tools/visibility_point_editor
 python tools/visibility_point_editor/export_assets.py --game "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo"
 ```
 
-This writes ignored files under:
-
-```text
-tools/visibility_point_editor/local_assets/
-```
-
-The weapon preview and muzzle point are only for tuning and visual context. Use the Weapon tab to choose a weapon and adjust its local position, rotation, and scale. Use the Export menu to copy or download the unchanged LOS JSON format.
+Exported Valve models, maps, navigation, sounds, and particles are written under the ignored `tools/visibility_point_editor/local_assets/` directory and must not be committed.
 
 ## Run
 
 ```powershell
-cd tools/visibility_point_editor
+cd C:\path\to\CS2FOW
+npm ci --prefix tools/visibility_point_editor
 python -m http.server 8765
 ```
 
-Open:
+Open `http://127.0.0.1:8765/tools/visibility_point_editor/viewer.html`. Serving the repository root lets Studio load local bakes from `data/maps`; **Load BVH8** works when no default Mirage bake is present.
 
-```text
-http://127.0.0.1:8765/viewer.html
+Run the alignment and simulation checks with:
+
+```powershell
+python tools/visibility_point_editor/check_runtime_alignment.py
+node tools/visibility_point_editor/check_bvh8.mjs
+node tools/visibility_point_editor/check_fps.mjs
 ```
 
-The editor exports only the ordered body-point preset:
-
-```json
-{
-	"version": 1,
-	"coordinate_space": "source_local",
-	"model": "ctm_sas",
-	"point_count": 1,
-	"points": [{"name": "head", "x": 0, "y": 0, "z": 64}]
-}
-```
-
-Copy and download reject blank or duplicate names, non-finite coordinates, and presets outside the 1-32 point limit. The final point cannot be deleted.
-
-Runtime integration is intentionally separate. CS2FOW combines these body points with generated axis-aligned bounding box corners and a muzzle sample in `visibility_sampling.cpp`; `check_points.py` verifies that the body-point order still matches.
+The runtime-alignment check compares capsule bindings, AABB padding, LOS order, muzzle lengths, viewing origins, defaults, reveal hold, smoke/HE behavior, and fail-open cases against the native source.
