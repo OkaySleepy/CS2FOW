@@ -134,7 +134,6 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 			hidden_group_clear(group);
 		}
 	}
-	hidden_fire_bullets_recipients_.fill(0);
 	he_clearance_history_.clear();
 	player_bone_cache_.fill({});
 	capture_timing_ = {};
@@ -165,22 +164,13 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	for (int i = 0; i < count; ++i)
 	{
 		CCheckTransmitInfo *info = infos[i];
-		if (info == nullptr)
+		if (info == nullptr || !read_checktransmit_full_update(info, compatibility_.transmit_offsets().full_update_offset))
 		{
 			continue;
 		}
 		int slot = -1;
 		std::memcpy(&slot, reinterpret_cast<const char *>(info) + compatibility_.recipient_slot_offset(), sizeof(slot));
 		if (slot < 0 || slot >= static_cast<int>(k_max_players))
-		{
-			continue;
-		}
-		const uint64_t recipient_bit = uint64_t {1} << slot;
-		for (uint64_t &recipients : hidden_fire_bullets_recipients_)
-		{
-			recipients &= ~recipient_bit;
-		}
-		if (!read_checktransmit_full_update(info, compatibility_.transmit_offsets().full_update_offset))
 		{
 			continue;
 		}
@@ -293,13 +283,11 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					hidden_fire_bullets_recipients_[target] |= uint64_t {1} << slot;
 					withhold_group(system, info->m_pTransmitEntity, dont_transmit, stored_group, slot, hide_reason::quarantine, now);
 				}
 				continue;
 			}
 			hidden_group_store(stored_group, cache.group, now, k_hidden_entity_quarantine);
-			hidden_fire_bullets_recipients_[target] |= uint64_t {1} << slot;
 			withhold_group(system, info->m_pTransmitEntity, dont_transmit, cache.group, slot, hide_reason::current, now);
 		}
 	}

@@ -17,8 +17,6 @@
 #include <tier1/convar.h>
 #include <tier1/utlstring.h>
 #include <tier1/utlvector.h>
-#include <google/protobuf/descriptor.h>
-#include <google/protobuf/message.h>
 
 #include <algorithm>
 #include <array>
@@ -109,8 +107,6 @@ CON_COMMAND_F(cs2fow_entity, "List, filter, or clear actual CS2FOW transmit clea
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, false, bool, bool, bool);
 SH_DECL_HOOK7_void(ISource2GameEntities, CheckTransmit, SH_NOATTRIB, false, CCheckTransmitInfo **, int, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int);
 SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, false, int, const char *, bool);
-SH_DECL_HOOK8_void(IGameEventSystem, PostEventAbstract, SH_NOATTRIB, 0, CSplitScreenSlot, bool, int,
-	const uint64 *, INetworkMessageInternal *, const CNetMessage *, unsigned long, NetChannelBufType_t);
 
 bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -141,22 +137,6 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	if (game_events_ == nullptr)
 	{
 		game_events_ = static_cast<IGameEventManager2 *>(ismm->VInterfaceMatch(ismm->GetServerFactory(), k_game_event_manager_interface));
-	}
-	game_event_system_ = static_cast<IGameEventSystem *>(ismm->VInterfaceMatch(
-		ismm->GetEngineFactory(), GAMEEVENTSYSTEM_INTERFACE_VERSION));
-	if (game_event_system_ == nullptr)
-	{
-		game_event_system_ = static_cast<IGameEventSystem *>(ismm->VInterfaceMatch(
-			ismm->GetServerFactory(), GAMEEVENTSYSTEM_INTERFACE_VERSION));
-	}
-	if (game_event_system_ != nullptr)
-	{
-		fire_bullets_hook_id_ = SH_ADD_HOOK(IGameEventSystem, PostEventAbstract, game_event_system_,
-			SH_MEMBER(this, &plugin::hook_post_event), false);
-	}
-	if (fire_bullets_hook_id_ == 0)
-	{
-		META_CONPRINTF("[CS2FOW] warning: hidden-player shot visual filtering is unavailable; wall filtering remains active\n");
 	}
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_GAMEDLL);
 	teammates_are_enemies_ = cvar_->FindConVar("mp_teammates_are_enemies");
@@ -202,9 +182,6 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 
 bool plugin::Unload(char *error, size_t max_length)
 {
-	if (fire_bullets_hook_id_ != 0) SH_REMOVE_HOOK_ID(fire_bullets_hook_id_);
-	fire_bullets_hook_id_ = 0;
-	game_event_system_ = nullptr;
 	if (game_events_ != nullptr) game_events_->RemoveListener(this);
 	game_events_ = nullptr;
 	he_event_available_ = false;
@@ -244,87 +221,6 @@ void plugin::FireGameEvent(IGameEvent *event)
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	he_clearance_history_.record(center, game_time);
 }
-
-void plugin::hook_post_event(CSplitScreenSlot slot, bool local_only, int client_count, const uint64 *clients,
-	INetworkMessageInternal *event, const CNetMessage *data, unsigned long size, NetChannelBufType_t buffer_type)
-{
-	if (!settings::current().enable || !disabled_reason_.empty() || clients == nullptr || client_count <= 0
-		|| event == nullptr || data == nullptr || game_event_system_ == nullptr)
-	{
-		return;
-	}
-	const NetMessageInfo_t *info = event->GetNetMessageInfo();
-	if (info == nullptr || info->m_MessageId != k_fire_bullets_message_id)
-	{
-		return;
-	}
-	auto *message = static_cast<google::protobuf::Message *>(data->AsProto());
-	const google::protobuf::Descriptor *descriptor = message == nullptr ? nullptr : message->GetDescriptor();
-	const google::protobuf::Reflection *reflection = message == nullptr ? nullptr : message->GetReflection();
-	const google::protobuf::FieldDescriptor *player_field = descriptor == nullptr
-		? nullptr : descriptor->FindFieldByNumber(k_fire_bullets_player_field_number);
-	if (reflection == nullptr || player_field == nullptr
-		|| player_field->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_UINT32)
-	{
-		return;
-	}
-	const uint32_t packed_shooter = reflection->GetUInt32(*message, player_field);
-	if (packed_shooter == k_invalid_packed_entity_handle)
-	{
-		return;
-	}
-
-	const std::shared_ptr<const visibility_result> result = worker_.result();
-	const auto now = std::chrono::steady_clock::now();
-	if (!result || !visibility_snapshot_fresh(result->captured, now))
-	{
-		return;
-	}
-	const uint64_t recipients = *clients;
-	uint64_t hidden = 0;
-	{
-		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
-		for (uint32_t target = 0; target < k_max_players; ++target)
-		{
-			CEntityInstance *const pawn = transmit_target_cache_[target].pawn;
-			if (pawn == nullptr || static_cast<uint32_t>(entity_handle(pawn).ToPackedInt()) != packed_shooter)
-			{
-				continue;
-			}
-			uint64_t candidates = hidden_fire_bullets_recipients_[target] & recipients;
-			for (uint32_t recipient = 0; recipient < k_max_players && candidates != 0; ++recipient)
-			{
-				const uint64_t bit = uint64_t {1} << recipient;
-				if ((candidates & bit) != 0
-					&& (!visibility_pair_enabled(recipient, target, result->players[recipient],
-						result->players[target], result->filter_teammates)
-						|| result->visible[recipient][target]))
-				{
-					candidates &= ~bit;
-				}
-			}
-			hidden = candidates;
-			break;
-		}
-	}
-	const fire_bullets_recipient_split split = split_fire_bullets_recipients(recipients, hidden);
-	if (split.sanitized == 0)
-	{
-		return;
-	}
-
-	static void (IGameEventSystem::*post_event)(CSplitScreenSlot, bool, int, const uint64 *,
-		INetworkMessageInternal *, const CNetMessage *, unsigned long, NetChannelBufType_t)
-		= &IGameEventSystem::PostEventAbstract;
-	const uint64 sanitized_clients = static_cast<uint64>(split.sanitized);
-	// Keep the real origin and sound fields; only detach player-owned client visuals.
-	reflection->SetUInt32(message, player_field, k_invalid_packed_entity_handle);
-	SH_CALL(game_event_system_, post_event)(slot, local_only, client_count, &sanitized_clients,
-		event, data, size, buffer_type);
-	reflection->SetUInt32(message, player_field, packed_shooter);
-	*const_cast<uint64 *>(clients) = static_cast<uint64>(split.normal);
-}
-
 void plugin::OnLevelInit(char const *map_name, char const *, char const *, char const *, bool, bool)
 {
 	if (map_name != nullptr && map_name[0] != '\0')
@@ -620,11 +516,6 @@ void plugin::check_config() const
 	else
 	{
 		META_CONPRINTF("[CS2FOW] mp_playerid=%d prevents hidden enemy target IDs\n", playerid);
-	}
-	if (fire_bullets_hook_id_ == 0)
-	{
-		META_CONPRINTF("[CS2FOW] review shot visuals: hidden-player tracer filtering is unavailable\n");
-		++findings;
 	}
 	if (findings == 0)
 	{
@@ -994,11 +885,7 @@ void plugin::print_status() const
 	}
 	int playerid = 0;
 	const bool playerid_safe = settings::playerid_mode(playerid) && playerid != 0;
-	if (action == nullptr && fire_bullets_hook_id_ == 0)
-	{
-		action = "Run cs2fow_metrics; hidden-player shot visual filtering is unavailable.";
-	}
-	else if (action == nullptr && !playerid_safe)
+	if (action == nullptr && !playerid_safe)
 	{
 		action = "Set mp_playerid 1 to prevent stale enemy target IDs.";
 	}
@@ -1018,14 +905,13 @@ void plugin::print_status() const
 		: compatibility_.smoke_available();
 	const bool ffa = teammates_are_enemies();
 	const bool protection_active = disabled_reason_.empty() && configuration.enable;
-	META_CONPRINTF("[CS2FOW] Protection: walls=%s smoke=%s HE=%s teammates=%s shots=%s target_ids=%s\n",
+	META_CONPRINTF("[CS2FOW] Protection: walls=%s smoke=%s HE=%s teammates=%s target_ids=%s\n",
 		protection_active ? "on" : "off",
 		configuration.smoke_occlusion && smoke_available ? "on" : "off",
 		configuration.smoke_occlusion && configuration.he_clear_radius_units > 0.0f
 			&& configuration.he_clear_seconds > 0.0f && he_event_available_
 				? "on" : "off",
 		visibility_teammate_filter_enabled(configuration.filter_teammates, ffa) ? "filtered" : "not filtered",
-		fire_bullets_hook_id_ == 0 ? "unavailable" : protection_active ? "filtered" : "off",
 		playerid_safe ? "safe" : "unrestricted");
 	META_CONPRINTF("[CS2FOW] Runtime: players=%u pairs=%u recent_p99=%.3fms snapshot_age=%.1fms\n",
 		players, stats.evaluated_pairs, stats.recent_p99_ms, age_ms);
@@ -1103,8 +989,8 @@ void plugin::print_metrics() const
 		visibility_teammate_filter_enabled(settings::current().filter_teammates, ffa) ? 1 : 0);
 	int playerid = 0;
 	const bool playerid_readable = settings::playerid_mode(playerid);
-	META_CONPRINTF("[CS2FOW] hidden shot visuals available=%d mp_playerid readable=%d value=%d\n",
-		fire_bullets_hook_id_ != 0 ? 1 : 0, playerid_readable ? 1 : 0, playerid);
+	META_CONPRINTF("[CS2FOW] mp_playerid readable=%d value=%d\n",
+		playerid_readable ? 1 : 0, playerid);
 	const uint32_t debug_beams = static_cast<uint32_t>(std::count_if(los_debug_beams_.begin(), los_debug_beams_.end(),
 		[](const los_debug_beam &beam) { return beam.handle.IsValid(); }));
 	META_CONPRINTF("[CS2FOW] temporary LOS debug player=%d available=%d beams=%u failed=%d\n",
