@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import {
 	FPS_CONSTANTS, FPS_DT, FpsSimulation, make_test_smoke, move_actor,
-	resolve_capsule, route_between, smoke_line_blocked, validate_nav
+	resolve_capsule, route_between, smoke_line_blocked, target_aabb, target_muzzle, trace_capsule_target,
+	validate_nav, weapon_muzzle_length
 } from "./fps_runtime.js";
+import {capsule_visible_from_origin, VISIBILITY_OCCLUDER_CACHE_SIZE} from "./capsule_visibility.js";
 
 const floor = {
 	v0: {x: -1000, y: -1000, z: 0},
@@ -15,13 +18,83 @@ const wall = {
 	v2: {x: 0, y: 0, z: 200}
 };
 
+const nativeWorker = readFileSync(new URL("../../src/plugin/visibility_worker.cpp", import.meta.url), "utf8");
+const nativeCapsules = readFileSync(new URL("../../src/core/capsule_visibility.h", import.meta.url), "utf8");
+const nativeSettings = readFileSync(new URL("../../src/plugin/settings.cpp", import.meta.url), "utf8");
+const nativeSampling = readFileSync(new URL("../../src/core/visibility_sampling.cpp", import.meta.url), "utf8");
+const nativeSamplingHeader = readFileSync(new URL("../../src/core/visibility_sampling.h", import.meta.url), "utf8");
+const nativeRaster = readFileSync(new URL("../../src/core/capsule_visibility.cpp", import.meta.url), "utf8");
+const nativeSmoke = readFileSync(new URL("../../src/core/smoke_occlusion.cpp", import.meta.url), "utf8");
+const nativeSmokeHeader = readFileSync(new URL("../../src/core/smoke_occlusion.h", import.meta.url), "utf8");
+const studioViewer = readFileSync(new URL("./viewer.js", import.meta.url), "utf8");
+assert.match(nativeWorker, /k_worker_budget\s*=\s*std::chrono::milliseconds\(75\)/,
+	"Studio's shared deadline must be reviewed when the native worker budget changes");
+assert.match(nativeWorker, /pair_started < revealed_until_\[recipient\]\[target\]/,
+	"Studio's hold short-circuit must be reviewed when native hold reuse changes");
+const holdOrder = nativeWorker.indexOf("pair_started < revealed_until_");
+const capsuleOrder = nativeWorker.indexOf("capsule_visible_from_origin(*data_");
+const aabbOrder = nativeWorker.indexOf("for (const vec3 &point : aabb_points)");
+const muzzleOrder = nativeWorker.indexOf("if (has_muzzle)");
+assert.ok(holdOrder < capsuleOrder && capsuleOrder < aabbOrder && aabbOrder < muzzleOrder,
+	"native runtime order must remain hold, capsules, AABB, muzzle");
+assert.match(nativeCapsules, /k_capsule_occluder_cache_size\s*=\s*96/,
+	"Studio's proof cache must be reviewed when native capacity changes");
+assert.match(nativeSettings, /cs2fow_visibility_hold_ms[\s\S]{0,160}\b1000, true, 0, true, 1000/,
+	"Studio's reveal-hold control must match the shipped native default and range");
+for (const [source, pattern, name] of [
+	[nativeSamplingHeader, /k_visibility_pixel_grid_size\s*=\s*32/, "32x32 visibility grid"],
+	[nativeSamplingHeader, /k_visibility_aabb_point_count\s*=\s*8/, "AABB point count"],
+	[nativeSampling, /k_horizontal_bounds_padding\s*=\s*16\.0f/, "AABB side padding"],
+	[nativeSampling, /k_top_bounds_padding\s*=\s*4\.0f/, "AABB top padding"],
+	[nativeRaster, /k_near_depth\s*=\s*0\.125f/, "near depth"],
+	[nativeRaster, /k_view_margin\s*=\s*1\.02f/, "view margin"],
+	[nativeRaster, /k_depth_epsilon\s*=\s*1\.0e-5f/, "depth epsilon"],
+	[nativeRaster, /radial_scale\s*=\s*1\.06f/, "outer capsule scale"],
+	[nativeSmokeHeader, /k_smoke_axis_cells\s*=\s*32/, "smoke grid"],
+	[nativeSmoke, /k_ignore_density\s*=\s*0\.1f/, "smoke ignore density"],
+	[nativeSmoke, /k_opaque_density\s*=\s*0\.8f/, "smoke opaque density"],
+	[nativeSmoke, /k_block_density\s*=\s*0\.2f/, "smoke block density"]
+]) assert.match(source, pattern, `Studio's ${name} must be reviewed when native runtime changes`);
+for (const [pattern, name] of [
+	[/weapon_muzzle_class::pistol: return 18\.0f/, "pistol muzzle"],
+	[/weapon_muzzle_class::smg: return 28\.0f/, "SMG muzzle"],
+	[/weapon_muzzle_class::rifle: return 36\.0f/, "rifle muzzle"],
+	[/weapon_muzzle_class::sniper: return 52\.0f/, "sniper muzzle"]
+]) assert.match(nativeSampling, pattern, `Studio's ${name} must be reviewed when native runtime changes`);
+const parseCapsules = (source, pattern) => [...source.matchAll(pattern)].map((row) =>
+	[row[1], ...row.slice(2).flatMap((field) => [...field.matchAll(/-?\d+(?:\.\d+)?/g)].map(Number))]);
+assert.deepEqual(
+	parseCapsules(studioViewer.slice(studioViewer.indexOf("const k_valve_hitbox_capsules"),
+		studioViewer.indexOf("const k_aabb_edges")), /\["([^"]+)", \[([^\]]+)\], \[([^\]]+)\], ([^\]]+)\]/g),
+	parseCapsules(nativeSampling.slice(nativeSampling.indexOf("k_visibility_capsule_bindings"),
+		nativeSampling.indexOf("bool visibility_transform_point")), /\{"([^"]+)", \{([^}]+)\}, \{([^}]+)\}, ([^}]+)\}/g),
+	"Studio's 19 capsule bindings must stay byte-for-number aligned with native runtime");
+
 function test_map(triangles = [])
 {
 	return {
 		metadata: {mapName: "test", worldMin: [-2000, -2000, -2000], worldMax: [2000, 2000, 2000]},
+		packetCount: triangles.length,
 		for_each_triangle_in_bounds(_minimum, _maximum, callback)
 		{
 			triangles.forEach((triangle, index) => callback(index, 0, triangle));
+		},
+		for_each_packet_triangle(packet, callback, traversal)
+		{
+			if (!Number.isInteger(packet) || packet < 0 || packet >= triangles.length) return false;
+			if (traversal) traversal.triangles.add(packet);
+			return callback(packet, 0, triangles[packet]) !== false;
+		},
+		for_each_triangle_in_view(_view, callback, traversal, stats, afterLeaf)
+		{
+			if (traversal) ++traversal.nodeVisits;
+			if (stats) ++stats.visitedNodes;
+			triangles.forEach((triangle, index) =>
+			{
+				if (traversal) traversal.triangles.add(index);
+				if (callback(index, 0, triangle) !== false) afterLeaf?.(index);
+			});
+			return true;
 		},
 		segment_hit(start, end)
 		{
@@ -41,8 +114,9 @@ function test_map(triangles = [])
 			if (traversal) ++traversal.triangleTests;
 			return {blocked: false, packet: 0xffffffff};
 		},
-		create_traversal() { return {triangleTests: 0}; },
-		finish_traversal(value) { return {triangles: new Uint32Array(), testedTriangles: value.triangleTests}; },
+		create_traversal() { return {nodes: new Set(), packets: new Set(), triangles: new Set(), nodeVisits: 0,
+			triangleTests: 0, boundsTests: 0, boundsHits: 0, packetTests: 0, cacheTests: 0, cacheHits: 0}; },
+		finish_traversal(value) { return {triangles: new Uint32Array(value.triangles), testedTriangles: value.triangleTests}; },
 		surfaceMap: {name: () => "metal_auto"}
 	};
 }
@@ -55,7 +129,92 @@ function actor(origin = {x: 64, y: 0, z: 0.02})
 	};
 }
 
+function capsule_target(origin, muzzleLength = 36)
+{
+	const capsules = new Float32Array(19 * 7);
+	for (let index = 0; index < 19; ++index)
+	{
+		const x = origin.x + (index % 3 - 1) * 4;
+		const y = origin.y + (Math.floor(index / 3) % 3 - 1) * 4;
+		const z = origin.z + 8 + index * 2.5;
+		capsules.set([x, y, z, x, y, z + 8, 3], index * 7);
+	}
+	const muzzle = target_muzzle({origin, yaw: 180, crouched: false}, muzzleLength);
+	return {capsules, aabb: target_aabb({origin, yaw: 180, crouched: false}),
+		muzzle: muzzle ? new Float32Array([muzzle.x, muzzle.y, muzzle.z]) : null};
+}
+
+const capsuleOrigin = {x: 0, y: 0, z: 40};
+const capsuleSet = capsule_target({x: 100, y: 0, z: 0}, 0).capsules;
+const openCapsuleResult = capsule_visible_from_origin(test_map(), capsuleOrigin, capsuleSet);
+assert.equal(openCapsuleResult.result, "visible",
+	"an unobstructed animated capsule volume must be visible");
+assert.equal(openCapsuleResult.stats.sampledPixels, 0, "the runtime does not sample pixels without active smoke");
+assert.equal(capsule_visible_from_origin(test_map(), capsuleOrigin, new Float32Array(7)).result, "indeterminate",
+	"an incomplete capsule snapshot must fail open");
+const oversizedCapsules = capsuleSet.slice();
+oversizedCapsules[6] = 33;
+assert.equal(capsule_visible_from_origin(test_map(), capsuleOrigin, oversizedCapsules).result, "indeterminate",
+	"capsules larger than the runtime's 32-unit limit must fail open");
+assert.equal(capsule_visible_from_origin(test_map(), capsuleOrigin, capsuleSet,
+	{targetOrigin: {x: -1000, y: 0, z: 0}}).result, "indeterminate",
+	"capsules farther than 128 units from the captured actor origin must fail open");
+const occludingWall = [
+	{v0: {x: 50, y: -200, z: -200}, v1: {x: 50, y: 200, z: -200}, v2: {x: 50, y: 200, z: 200}},
+	{v0: {x: 50, y: -200, z: -200}, v1: {x: 50, y: 200, z: 200}, v2: {x: 50, y: -200, z: 200}}
+];
+const wallResult = capsule_visible_from_origin(test_map(occludingWall), capsuleOrigin, capsuleSet);
+assert.equal(wallResult.result, "blocked", "a complete wall must occlude the full capsule silhouette");
+assert.equal(wallResult.reason, "wall");
+assert.ok(wallResult.occluderCache.length > 0, "a proven wall should populate the runtime occluder cache");
+assert.ok(wallResult.occluderCache.length <= VISIBILITY_OCCLUDER_CACHE_SIZE,
+	"the browser proof cache must use the runtime's 96-leaf capacity");
+const warmWallResult = capsule_visible_from_origin(test_map(occludingWall), capsuleOrigin, capsuleSet,
+	{occluderCache: wallResult.occluderCache});
+assert.equal(warmWallResult.result, "blocked");
+assert.equal(warmWallResult.stats.visitedNodes, 0, "a warm wall cache should avoid the full BVH traversal");
+const compactedWall = capsule_visible_from_origin(test_map([
+	{v0: {x: 50, y: 500, z: 500}, v1: {x: 50, y: 600, z: 500}, v2: {x: 50, y: 500, z: 600}},
+	...occludingWall
+]), capsuleOrigin, capsuleSet);
+assert.ok(compactedWall.occluderCache.length > 0 && compactedWall.occluderCache.length < 3,
+	"proof compaction must discard an irrelevant prefix when the native-style suffix still occludes the target");
+const smokeResult = capsule_visible_from_origin(test_map(), capsuleOrigin, capsuleSet, {smokeBlocked: () => true});
+assert.equal(smokeResult.result, "blocked", "smoke must test the exact geometry-clear capsule rays");
+assert.equal(smokeResult.reason, "smoke");
+
+const capsulePriorityTarget = capsule_target({x: 100, y: 0, z: 0}, 0);
+const capsulePriorityResult = trace_capsule_target(test_map(),
+	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}}, capsulePriorityTarget,
+	{debug: true, targetOrigin: {x: 100, y: 0, z: 0}});
+assert.equal(capsulePriorityResult.rawVisible, true, "the full capsule silhouette must decide a clear target first");
+assert.equal(capsulePriorityResult.tracedRays, 0,
+	"clear capsules without smoke must not fall through to AABB or muzzle rays");
+assert.equal(capsulePriorityResult.rays.length, 0,
+	"debug must not invent a chest ray before the capsule decision");
+const muzzleFallbackMap = test_map(occludingWall);
+muzzleFallbackMap.segment_blocked = (_start, end) =>
+	({blocked: Math.abs(end.x - 64) > 0.001, packet: 0});
+const muzzleFallback = trace_capsule_target(muzzleFallbackMap,
+	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}},
+	capsule_target({x: 100, y: 0, z: 0}, 36), {targetOrigin: {x: 100, y: 0, z: 0}});
+assert.equal(muzzleFallback.rawVisible, true,
+	"runtime order must reach the muzzle after capsules and all eight AABB corners are blocked");
+assert.equal(muzzleFallback.tracedRays, 9,
+	"the eight blocked AABB corners and clear muzzle must all be counted");
+const aabbFallbackMap = test_map(occludingWall);
+aabbFallbackMap.segment_blocked = (_start, end) =>
+	({blocked: Math.abs(end.x - 68) > 0.001, packet: 0});
+const aabbFallback = trace_capsule_target(aabbFallbackMap,
+	{origin: {x: 0, y: 0, z: 0}, eye: capsuleOrigin, yaw: 0, pingMs: 0, buttons: {}},
+	capsule_target({x: 100, y: 0, z: 0}, 0), {targetOrigin: {x: 100, y: 0, z: 0}});
+assert.equal(aabbFallback.rawVisible, true,
+	"runtime order must test the eight padded AABB corners after a blocked capsule silhouette");
+assert.equal(aabbFallback.tracedRays, 1, "the first clear AABB corner must be counted");
+
 assert.equal(FPS_DT, 1 / 64);
+assert.deepEqual(["pistol", "smg", "rifle", "sniper"].map(weapon_muzzle_length), [18, 28, 36, 52],
+	"all native muzzle classes must remain available in Studio");
 assert.deepEqual(
 	["accelerate", "airAccelerate", "airWishSpeed", "friction", "gravity", "jumpImpulse", "stopSpeed", "globalMaxSpeed", "radius", "standingHeight", "crouchedHeight", "stepHeight", "maxSlopeDegrees"]
 		.map((key) => FPS_CONSTANTS[key]),
@@ -131,6 +290,10 @@ assert.equal(smoke_line_blocked(openMap, [smoke], [{center: {x: 0, y: 0, z: 64},
 	"HE before smoke cannot clear it");
 assert.equal(smoke_line_blocked(openMap, [smoke], [{center: {x: 0, y: 0, z: 64}, time: 1}], rayStart, rayEnd, 3.5), true,
 	"HE clearance expires at 2.5 seconds");
+assert.equal(smoke_line_blocked(openMap, [smoke], [{center: {x: 0, y: 50, z: 64}, time: 1}], rayStart, rayEnd, 2,
+	[], {heRadius: 20, heSeconds: 4}), true, "configured HE radius must control smoke clearing");
+assert.equal(smoke_line_blocked(openMap, [smoke], [{center: {x: 0, y: 0, z: 64}, time: 1}], rayStart, rayEnd, 2,
+	[], {heRadius: 0, heSeconds: 4}), true, "zero HE radius must disable smoke clearing like the runtime");
 assert.equal(smoke_line_blocked(openMap, [smoke], [], rayStart, rayEnd, 22.5), false, "smoke fade completes safely");
 
 const splitMap = test_map();
@@ -159,13 +322,54 @@ assert.deepEqual(nav.objectives.b, {x: 256, y: 64, z: 0});
 assert.equal(route_between(nav, {x: 0, y: 0, z: 0}, {x: 256, y: 0, z: 0}).length, 2);
 assert.throws(() => validate_nav({version: 1, areas: [{id: 1, corners: [], connections: []}]}), /invalid/i);
 
+const standingAabb = target_aabb({origin: {x: 10, y: 20, z: 30}, yaw: 90, crouched: false});
+assert.equal(standingAabb.length, 24, "runtime target must include eight AABB corners");
+assert.deepEqual(Array.from(standingAabb.slice(0, 3)), [-22, -12, 30],
+	"runtime AABB must use 16-unit side padding");
+const nativeMuzzle = target_muzzle({origin: {x: 10, y: 20, z: 30}, yaw: 90, crouched: false}, 36);
+assert.ok(Math.abs(nativeMuzzle.x - 10) < 0.001 && Math.abs(nativeMuzzle.y - 56) < 0.001 && nativeMuzzle.z === 90);
+const interpolatedMuzzle = target_muzzle({origin: {x: 0, y: 0, z: 0}, yaw: 0, height: 54}, 36);
+assert.ok(interpolatedMuzzle.z > 38 && interpolatedMuzzle.z < 60, "interpolated stance height must move the muzzle smoothly");
+const crouchedAabb = target_aabb({origin: {x: 0, y: 0, z: 0}, yaw: 0, crouched: true});
+assert.equal(crouchedAabb[14], FPS_CONSTANTS.crouchedHeight + 4,
+	"crouched AABB must use the simulated live hull");
+
 const simulation = new FpsSimulation(openMap, {
 	viewer: {x: -300, y: 0, z: 0.02, yaw: 0},
 	target: {x: 300, y: 0, z: 0.02, yaw: 180},
 	playerSpeed: 225,
 	botSpeed: 225,
-	pingMs: 200
+	pingMs: 200,
+	botMuzzleLength: 36
 });
+const seededSettings = {
+	viewer: {x: -300, y: 0, z: 0.02, yaw: 0}, target: {x: 300, y: 0, z: 0.02, yaw: 180}, seed: 1234
+};
+assert.deepEqual(new FpsSimulation(openMap, seededSettings).bots.map((bot) => bot.yaw),
+	new FpsSimulation(openMap, seededSettings).bots.map((bot) => bot.yaw), "bot simulation seed must reproduce random choices");
+const animatedTargetSimulation = new FpsSimulation(openMap, seededSettings);
+const animatedTargetSets = animatedTargetSimulation.bots.map((bot) => capsule_target(bot.origin));
+animatedTargetSimulation.set_targets(animatedTargetSets);
+for (let index = 0; index < animatedTargetSets.length; ++index)
+	assert.equal(animatedTargetSimulation.targetSets[index], animatedTargetSets[index], `bot ${index + 1} must use its animated capsule set`);
+const alignedMap = test_map(occludingWall);
+let alignedPoint = null;
+alignedMap.segment_blocked = (_start, end) =>
+{
+	alignedPoint = end;
+	return {blocked: false, packet: 0xffffffff};
+};
+const alignedSimulation = new FpsSimulation(alignedMap, seededSettings);
+const staleTarget = capsule_target({x: 100, y: 0, z: 0}, 0);
+staleTarget.pose = {x: 100, y: 0, z: 0, yaw: 0};
+alignedSimulation.bot.origin = {x: 200, y: 50, z: 10};
+alignedSimulation.bot.yaw = 90;
+alignedSimulation.set_targets([staleTarget]);
+alignedSimulation.visibility(alignedSimulation.bot, 0);
+assert.ok(Math.abs(alignedPoint.x - 168) < 0.001 && Math.abs(alignedPoint.y - 18) < 0.001,
+	"transferred target data must stay aligned to the worker's current actor pose");
+simulation.set_targets(simulation.bots.map((bot) => capsule_target(bot.origin)));
+simulation.set_debug(true);
 simulation.set_input({w: true, a: true});
 const state = simulation.step();
 assert.equal(state.bots.length, 3, "Play should simulate three terrorist bots");
@@ -178,8 +382,19 @@ for (let left = 0; left < state.bots.length; ++left)
 			state.bots[left].origin.y - state.bots[right].origin.y) >= 1000,
 		"extra bot spawns should be separated by at least 1000 units");
 assert.equal(state.visibility.origins.length / 3, 6);
-assert.equal(state.visibility.targets.length / 3, 23);
-assert.equal(state.visibility.blocked.length, 138);
+assert.ok(state.visibilities.every((visibility) => visibility.sampledPixels === 0 && visibility.tracedRays === 0),
+	"the no-smoke path must stop after the runtime's clear capsule silhouette");
+assert.ok(state.visibilities.every((visibility) => visibility.rays.length === 0 && visibility.blocked.length === 0),
+	"debug output must not invent direct rays for the capsule-only decision");
+const heldVisibility = simulation.visibility(simulation.bot, 0);
+assert.equal(heldVisibility.held, true, "an active reveal hold must be reused before LOS work");
+assert.equal(heldVisibility.tracedRays, 0, "hold reuse must skip capsule, AABB, and muzzle work like runtime");
+simulation.player.crouched = true;
+const crouchedVisibility = simulation.visibility(simulation.bot, 0);
+assert.ok(Math.abs(crouchedVisibility.origins[2] - (simulation.player.origin.z + 28.5)) < 0.001,
+	"crouched visibility must originate from the crouched eye");
+simulation.step();
+simulation.revealedUntil.fill(0);
 simulation.request_traversal();
 const traversalState = simulation.step();
 assert.equal(traversalState.visibilities.filter((visibility) => visibility.traversal).length, 3,

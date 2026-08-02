@@ -2,6 +2,8 @@
 // synthetic smoke inputs, and the same wall/smoke visibility decision as CS2FOW.
 
 import {runtime_origins, BVH8_INVALID_REF} from "./bvh8.js";
+import {capsule_visible_from_origin, VISIBILITY_CAPSULE_FLOATS,
+	VISIBILITY_OCCLUDER_CACHE_SIZE} from "./capsule_visibility.js";
 
 export const FPS_TICK_RATE = 64;
 export const FPS_DT = 1 / FPS_TICK_RATE;
@@ -31,12 +33,11 @@ const SMOKE_BLOCK = 0.2;
 const SMOKE_MAX_STEPS = 128;
 const SMOKE_LIMIT = 32;
 const HE_LIMIT = 64;
-const HE_RADIUS = 100;
-const HE_SECONDS = 2.5;
+const DEFAULT_HE_RADIUS = 100;
+const DEFAULT_HE_SECONDS = 2.5;
 const BULLET_SMOKE_RADIUS = 28;
 const BULLET_SMOKE_SECONDS = 0.8;
 const GROUND_NORMAL_Z = Math.cos(FPS_CONSTANTS.maxSlopeDegrees * Math.PI / 180);
-
 const add = (a, b) => ({x: a.x + b.x, y: a.y + b.y, z: a.z + b.z});
 const sub = (a, b) => ({x: a.x - b.x, y: a.y - b.y, z: a.z - b.z});
 const mul = (a, amount) => ({x: a.x * amount, y: a.y * amount, z: a.z * amount});
@@ -521,29 +522,33 @@ function smoke_volume_density(volume, origin, target, cuts, now)
 	return accumulated;
 }
 
-function he_opens_smoke(map, clearance, smoke, origin, target, now)
+function he_opens_smoke(map, clearance, smoke, origin, target, now, heRadius, heSeconds)
 {
 	const age = now - clearance.time;
-	if (age < 0 || age >= HE_SECONDS || clearance.time < smoke.startTime) return false;
+	if (heRadius <= 0 || heSeconds <= 0 || age < 0 || age >= heSeconds || clearance.time < smoke.startTime) return false;
 	const boxDistance = {
 		x: Math.max(Math.abs(clearance.center.x - smoke.center.x) - SMOKE_HALF, 0),
 		y: Math.max(Math.abs(clearance.center.y - smoke.center.y) - SMOKE_HALF, 0),
 		z: Math.max(Math.abs(clearance.center.z - smoke.center.z) - SMOKE_HALF, 0)
 	};
-	if (length_sq(boxDistance) > HE_RADIUS ** 2) return false;
+	if (length_sq(boxDistance) > heRadius ** 2) return false;
 	const direction = sub(target, origin);
 	const parameter = length_sq(direction) <= 0 ? 0 : clamp(dot(sub(clearance.center, origin), direction) / length_sq(direction), 0, 1);
 	const closest = add(origin, mul(direction, parameter));
-	return length_sq(sub(clearance.center, closest)) <= HE_RADIUS ** 2 && !map.segment_blocked(clearance.center, closest).blocked;
+	return length_sq(sub(clearance.center, closest)) <= heRadius ** 2 && !map.segment_blocked(clearance.center, closest).blocked;
 }
 
-export function smoke_line_blocked(map, smokes, clearances, origin, target, now, cuts = [])
+export function smoke_line_blocked(map, smokes, clearances, origin, target, now, cuts = [], tuning = {})
 {
 	if (!finite_vec(origin) || !finite_vec(target)) return false;
+	const requestedRadius = Number(tuning.heRadius);
+	const requestedSeconds = Number(tuning.heSeconds);
+	const heRadius = Number.isFinite(requestedRadius) ? clamp(requestedRadius, 0, 320) : DEFAULT_HE_RADIUS;
+	const heSeconds = Number.isFinite(requestedSeconds) ? clamp(requestedSeconds, 0, 10) : DEFAULT_HE_SECONDS;
 	let total = 0;
 	for (const smoke of smokes)
 	{
-		if (clearances.some((clearance) => he_opens_smoke(map, clearance, smoke, origin, target, now))) continue;
+		if (clearances.some((clearance) => he_opens_smoke(map, clearance, smoke, origin, target, now, heRadius, heSeconds))) continue;
 		total += smoke_volume_density(smoke, origin, target, cuts, now) * smoke_age_scale(now - smoke.startTime);
 		if (total >= SMOKE_BLOCK) return true;
 	}
@@ -647,18 +652,213 @@ export function route_between(nav, startPoint, targetPoint)
 	return [];
 }
 
-export function default_targets(bot)
+function target_height(bot)
 {
-	const local = [
-		[-24, -24, 0], [24, -24, 0], [-24, 24, 0], [24, 24, 0],
-		[-24, -24, 80], [24, -24, 80], [-24, 24, 80], [24, 24, 80],
-		[0, 0, 64], [0, 0, 59], [0, 0, 54], [0, 0, 38], [-8, 8, 61], [8, -8, 61],
-		[-8, 4, 42], [8, -4, 42], [-7, 3, 22], [7, -3, 22], [-7, 3, 7], [7, -3, 7],
-		[-6, 8, 48], [6, -8, 48], [0, 0, 47]
-	];
-	const values = new Float32Array(local.length * 3);
-	local.forEach((point, index) => values.set([bot.origin.x + point[0], bot.origin.y + point[1], bot.origin.z + point[2]], index * 3));
-	return values;
+	const requestedHeight = Number(bot.height);
+	return Number.isFinite(requestedHeight) ? Math.max(0, requestedHeight)
+		: bot.crouched ? FPS_CONSTANTS.crouchedHeight : 72;
+}
+
+function adjusted_target_z(bot, z)
+{
+	if (z < 38) return z;
+	const height = target_height(bot);
+	return 38 + (z - 38) * Math.max(0, height - 38) / 34;
+}
+
+function target_world_point(bot, point)
+{
+	const yaw = (Number(bot.yaw) || 0) * Math.PI / 180;
+	const cosine = Math.cos(yaw);
+	const sine = Math.sin(yaw);
+	return {
+		x: bot.origin.x + cosine * point[0] - sine * point[1],
+		y: bot.origin.y + sine * point[0] + cosine * point[1],
+		z: bot.origin.z + adjusted_target_z(bot, point[2])
+	};
+}
+
+export function weapon_muzzle_length(key)
+{
+	return key === "usp_silencer" || key === "pistol" ? 18 : key === "smg" ? 28
+		: key === "m4a1_silencer" || key === "rifle" ? 36 : key === "awp" || key === "sniper" ? 52 : 0;
+}
+
+export function target_muzzle(bot, muzzleLength)
+{
+	return muzzleLength > 0 ? target_world_point(bot, [muzzleLength, 0, 60]) : null;
+}
+
+export function target_aabb(bot)
+{
+	const height = target_height(bot);
+	return new Float32Array([
+		bot.origin.x - 32, bot.origin.y - 32, bot.origin.z,
+		bot.origin.x + 32, bot.origin.y - 32, bot.origin.z,
+		bot.origin.x - 32, bot.origin.y + 32, bot.origin.z,
+		bot.origin.x + 32, bot.origin.y + 32, bot.origin.z,
+		bot.origin.x - 32, bot.origin.y - 32, bot.origin.z + height + 4,
+		bot.origin.x + 32, bot.origin.y - 32, bot.origin.z + height + 4,
+		bot.origin.x - 32, bot.origin.y + 32, bot.origin.z + height + 4,
+		bot.origin.x + 32, bot.origin.y + 32, bot.origin.z + height + 4
+	]);
+}
+
+function valid_target_set(value, targetOrigin = null)
+{
+	if (!value || !(value.capsules instanceof Float32Array)
+		|| value.capsules.length !== VISIBILITY_CAPSULE_FLOATS
+		|| !(value.aabb instanceof Float32Array) || value.aabb.length !== 24 || !value.aabb.every(Number.isFinite)
+		|| value.muzzle != null && (!(value.muzzle instanceof Float32Array)
+			|| value.muzzle.length !== 3 || !value.muzzle.every(Number.isFinite))
+		|| value.pose != null && (!finite_vec(value.pose) || !Number.isFinite(value.pose.yaw))) return false;
+	for (let index = 0; index < value.capsules.length; index += 7)
+	{
+		const start = {x: value.capsules[index], y: value.capsules[index + 1], z: value.capsules[index + 2]};
+		const end = {x: value.capsules[index + 3], y: value.capsules[index + 4], z: value.capsules[index + 5]};
+		const radius = value.capsules[index + 6];
+		if (!finite_vec(start) || !finite_vec(end) || !Number.isFinite(radius) || radius <= 0 || radius > 32
+			|| targetOrigin && (length_sq(sub(start, targetOrigin)) > 128 ** 2
+				|| length_sq(sub(end, targetOrigin)) > 128 ** 2)) return false;
+	}
+	return true;
+}
+
+function align_target_set(value, actor)
+{
+	if (!value?.pose || !finite_vec(actor) || !Number.isFinite(actor.yaw)) return value;
+	const radians = (actor.yaw - value.pose.yaw) * Math.PI / 180;
+	const cosine = Math.cos(radians);
+	const sine = Math.sin(radians);
+	const transform = (x, y, z) =>
+	{
+		const localX = x - value.pose.x;
+		const localY = y - value.pose.y;
+		return {x: actor.x + cosine * localX - sine * localY,
+			y: actor.y + sine * localX + cosine * localY, z: actor.z + z - value.pose.z};
+	};
+	const capsules = new Float32Array(value.capsules.length);
+	for (let index = 0; index < value.capsules.length; index += 7)
+	{
+		const start = transform(value.capsules[index], value.capsules[index + 1], value.capsules[index + 2]);
+		const end = transform(value.capsules[index + 3], value.capsules[index + 4], value.capsules[index + 5]);
+		capsules.set([start.x, start.y, start.z, end.x, end.y, end.z, value.capsules[index + 6]], index);
+	}
+	const muzzlePoint = value.muzzle && transform(value.muzzle[0], value.muzzle[1], value.muzzle[2]);
+	const aabb = value.aabb.slice();
+	for (let index = 0; index < aabb.length; index += 3)
+	{
+		aabb[index] += actor.x - value.pose.x;
+		aabb[index + 1] += actor.y - value.pose.y;
+		aabb[index + 2] += actor.z - value.pose.z;
+	}
+	return {capsules, aabb, muzzle: muzzlePoint ? new Float32Array([muzzlePoint.x, muzzlePoint.y, muzzlePoint.z]) : null};
+}
+
+export function trace_capsule_target(map, viewer, targetSet, options = {})
+{
+	const traversal = options.captureTraversal ? map.create_traversal() : null;
+	const origins = runtime_origins(map, viewer, traversal);
+	const originValues = new Float32Array(origins.length * 3);
+	origins.forEach((origin, index) => originValues.set([origin.x, origin.y, origin.z], index * 3));
+	const rays = [];
+	const blockedRays = [];
+	const stats = {sampledPixels: 0, tracedRays: 0, visitedNodes: 0, rasterizedTriangles: 0};
+	const deadline = Number.isFinite(options.deadline) ? options.deadline : (globalThis.performance?.now?.() ?? Date.now()) + 75;
+	const valid = valid_target_set(targetSet, options.targetOrigin);
+	const muzzle = valid && targetSet.muzzle ? {x: targetSet.muzzle[0], y: targetSet.muzzle[1], z: targetSet.muzzle[2]} : null;
+	const fallbacks = valid ? [
+		...Array.from({length: 8}, (_, index) => ({
+			x: targetSet.aabb[index * 3], y: targetSet.aabb[index * 3 + 1], z: targetSet.aabb[index * 3 + 2]
+		})),
+		...(muzzle ? [muzzle] : [])
+	] : [];
+	const previousCache = options.cache;
+	const previousPackets = previousCache?.packets ?? previousCache;
+	const packets = previousPackets?.length === origins.length
+		? previousPackets : new Uint32Array(origins.length).fill(BVH8_INVALID_REF);
+	const previousOccluders = previousCache?.occluders;
+	const occluders = Array.from({length: origins.length}, (_, index) =>
+		previousOccluders?.length === origins.length && Array.isArray(previousOccluders[index])
+			? previousOccluders[index].slice(0, VISIBILITY_OCCLUDER_CACHE_SIZE) : []);
+	if (options.held)
+	{
+		return {origins: originValues, rays: new Float32Array(), blocked: new Uint8Array(), clearCount: 0,
+			rawVisible: false, visible: true, held: true, indeterminate: false, wallBlocked: false,
+			smokeBlocked: false, cache: {packets, occluders}, ...stats, traversal: null};
+	}
+	let rawVisible = !valid;
+	let indeterminate = !valid;
+	let wallBlocked = false;
+	let smokeBlocked = false;
+	for (let originIndex = 0; valid && !rawVisible && originIndex < origins.length; ++originIndex)
+	{
+		const origin = origins[originIndex];
+		const query = capsule_visible_from_origin(map, origin, targetSet.capsules, {
+			deadline,
+			traversal,
+			debug: Boolean(options.debug),
+			smokeActive: Boolean(options.smokeActive),
+			smokeBlocked: options.smokeBlocked,
+			targetOrigin: options.targetOrigin,
+			occluderCache: occluders[originIndex]
+		});
+		if (Array.isArray(query.occluderCache)) occluders[originIndex] = query.occluderCache;
+		for (const [key, value] of Object.entries(query.stats)) stats[key] += value;
+		if (options.debug)
+		{
+			rays.push(...query.rays);
+			blockedRays.push(...query.blocked);
+		}
+		if (query.result !== "blocked")
+		{
+			rawVisible = true;
+			indeterminate = query.result === "indeterminate";
+			break;
+		}
+		wallBlocked ||= query.reason === "wall";
+		smokeBlocked ||= query.reason === "smoke";
+		for (const point of fallbacks)
+		{
+			const wall = map.segment_blocked(origin, point, packets[originIndex], traversal);
+			packets[originIndex] = wall.packet;
+			++stats.tracedRays;
+			const fallbackSmokeBlocked = !wall.blocked && Boolean(options.smokeBlocked?.(origin, point));
+			wallBlocked ||= wall.blocked;
+			smokeBlocked ||= fallbackSmokeBlocked;
+			if (options.debug)
+			{
+				rays.push(origin.x, origin.y, origin.z, point.x, point.y, point.z);
+				blockedRays.push(wall.blocked ? 1 : fallbackSmokeBlocked ? 2 : 0);
+			}
+			if (!wall.blocked && !fallbackSmokeBlocked)
+			{
+				rawVisible = true;
+				break;
+			}
+		}
+	}
+	const blocked = new Uint8Array(blockedRays);
+	return {
+		origins: originValues,
+		rays: new Float32Array(rays),
+		blocked,
+		clearCount: blocked.reduce((total, value) => total + Number(value === 0), 0),
+		rawVisible,
+		visible: rawVisible,
+		indeterminate,
+		wallBlocked,
+		smokeBlocked,
+		cache: {packets, occluders},
+		...stats,
+		traversal: traversal ? map.finish_traversal(traversal) : null
+	};
+}
+
+function seeded_random(seed)
+{
+	let state = (Number(seed) >>> 0) || 0x9e3779b9;
+	return () => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 0x100000000);
 }
 
 function make_bot_brain(bot, index)
@@ -682,8 +882,15 @@ export class FpsSimulation
 		this.playerSpeed = Number(settings.playerSpeed) || 225;
 		this.botSpeed = Number(settings.botSpeed) || 225;
 		this.pingMs = Number(settings.pingMs) || 0;
+		this.tuning = settings.tuning || {};
+		this.heTuning = {heRadius: settings.heRadius, heSeconds: settings.heSeconds};
+		this.heSeconds = Number.isFinite(Number(settings.heSeconds)) ? clamp(Number(settings.heSeconds), 0, 10) : DEFAULT_HE_SECONDS;
+		this.botMuzzleLength = Math.max(0, Number(settings.botMuzzleLength) || 0);
+		const requestedHold = Number(settings.visibilityHoldMs);
+		this.visibilityHoldSeconds = (Number.isFinite(requestedHold) ? clamp(requestedHold, 0, 1000) : 1000) / 1000;
+		this.random = seeded_random(settings.seed);
 		this.debug = false;
-		this.targets = null;
+		this.targetSets = [];
 		this.smokes = [];
 		this.clearances = [];
 		this.smokeCuts = [];
@@ -694,6 +901,7 @@ export class FpsSimulation
 		while (this.bots.length < 3) this.bots.push(this.spawn_bot());
 		this.botBrains = this.bots.map(make_bot_brain);
 		this.caches = this.bots.map(() => null);
+		this.revealedUntil = this.bots.map(() => 0);
 		this.events = [];
 		this.captureTraversal = false;
 	}
@@ -714,12 +922,16 @@ export class FpsSimulation
 			const angle = this.bots.length * Math.PI * 2 / 3;
 			origin = add(origin, {x: Math.cos(angle) * 1200, y: Math.sin(angle) * 1200, z: 0});
 		}
-		return make_actor({...origin, yaw: Math.random() * 360});
+		return make_actor({...origin, yaw: this.random() * 360});
 	}
 
 	set_input(value) { this.playerButtons = {...value}; }
 	set_look(yaw, pitch) { if (Number.isFinite(yaw)) this.player.yaw = yaw; if (Number.isFinite(pitch)) this.player.pitch = clamp(pitch, -89, 89); }
-	set_targets(values) { if (values instanceof Float32Array && values.length >= 3) this.targets = values; }
+	set_targets(values)
+	{
+		const sets = Array.isArray(values) ? values : [values];
+		this.targetSets = sets.map((value) => valid_target_set(value) ? value : null);
+	}
 	set_debug(value) { this.debug = Boolean(value); }
 	request_traversal() { this.captureTraversal = true; }
 	set_player_speed(value) { if (Number.isFinite(value) && value > 0) this.playerSpeed = Math.min(value, FPS_CONSTANTS.globalMaxSpeed); }
@@ -774,7 +986,7 @@ export class FpsSimulation
 		const separated = candidates.filter((area) => otherBots.every((other) => length_sq(sub(area.center, other.origin)) >= 1000 ** 2)
 			&& otherGoals.every((goal) => length_sq(sub(area.center, goal)) >= 1000 ** 2));
 		if (separated.length) candidates = separated;
-		const chosen = candidates[Math.floor(Math.random() * candidates.length)] || [...this.nav.areas.values()][Math.floor(Math.random() * this.nav.areas.size)];
+		const chosen = candidates[Math.floor(this.random() * candidates.length)] || [...this.nav.areas.values()][Math.floor(this.random() * this.nav.areas.size)];
 		if (!chosen)
 		{
 			brain.route = [];
@@ -838,7 +1050,7 @@ export class FpsSimulation
 				else
 				{
 					brain.mode = "camp";
-					brain.campUntil = this.time + 8 + Math.random() * 10;
+					brain.campUntil = this.time + 8 + this.random() * 10;
 				}
 			}
 		}
@@ -847,7 +1059,7 @@ export class FpsSimulation
 			buttons.w = true;
 			const yaw = brain.wanderYaw * Math.PI / 180;
 			const probe = add(bot.origin, {x: Math.cos(yaw) * 96, y: Math.sin(yaw) * 96, z: 36});
-			if (this.map.segment_blocked(add(bot.origin, {x: 0, y: 0, z: 36}), probe).blocked) brain.wanderYaw += 90 + Math.random() * 90;
+			if (this.map.segment_blocked(add(bot.origin, {x: 0, y: 0, z: 36}), probe).blocked) brain.wanderYaw += 90 + this.random() * 90;
 			desiredYaw = brain.wanderYaw;
 		}
 		else
@@ -888,7 +1100,7 @@ export class FpsSimulation
 			brain.route = [];
 			brain.routeIndex = 0;
 			brain.nextGoal = 0;
-			brain.wanderYaw += 90 + Math.random() * 90;
+			brain.wanderYaw += 90 + this.random() * 90;
 			brain.jumpOrigin = {...bot.origin};
 			brain.failedJumps = 0;
 		}
@@ -944,44 +1156,41 @@ export class FpsSimulation
 			}
 		}
 		this.smokes = this.smokes.filter((smoke) => this.time - smoke.startTime < 22.5);
-		this.clearances = this.clearances.filter((clearance) => this.time - clearance.time < HE_SECONDS);
+		this.clearances = this.clearances.filter((clearance) => this.time - clearance.time < this.heSeconds);
 		this.smokeCuts = this.smokeCuts.filter((cut) => this.time - cut.time < BULLET_SMOKE_SECONDS);
 	}
 
-	visibility(bot, botIndex, captureTraversal = false)
+	visibility(bot, botIndex, captureTraversal = false, deadline = Infinity)
 	{
-		const targetValues = botIndex === 0 && this.targets || default_targets(bot);
-		const targets = [];
-		for (let index = 0; index < targetValues.length; index += 3) targets.push({x: targetValues[index], y: targetValues[index + 1], z: targetValues[index + 2]});
-		const traversal = captureTraversal ? this.map.create_traversal() : null;
-		const origins = runtime_origins(this.map, {
+		const held = this.time < this.revealedUntil[botIndex];
+		const alignedTarget = align_target_set(this.targetSets[botIndex], bot.origin ? {...bot.origin, yaw: bot.yaw} : bot);
+		const liveMuzzle = target_muzzle(bot, this.botMuzzleLength);
+		const targetSet = alignedTarget && {...alignedTarget,
+			muzzle: liveMuzzle ? new Float32Array([liveMuzzle.x, liveMuzzle.y, liveMuzzle.z]) : null};
+		const result = trace_capsule_target(this.map, {
 			origin: this.player.origin,
+			eye: add(this.player.origin, {x: 0, y: 0, z: this.player.crouched ? 28.5 : 64}),
 			yaw: this.player.yaw,
 			pingMs: this.pingMs,
+			tuning: this.tuning,
 			buttons: this.playerButtons
-		}, traversal);
-		const rayCount = origins.length * targets.length;
-		const previousCache = this.caches[botIndex];
-		const cache = previousCache?.length === rayCount ? previousCache : new Uint32Array(rayCount).fill(BVH8_INVALID_REF);
-		const blocked = new Uint8Array(rayCount);
-		let clearCount = 0;
-		let ray = 0;
-		for (const origin of origins)
-		{
-			for (const target of targets)
-			{
-				const wall = this.map.segment_blocked(origin, target, cache[ray], traversal);
-				cache[ray] = wall.packet;
-				blocked[ray] = wall.blocked ? 1 : smoke_line_blocked(this.map, this.smokes, this.clearances, origin, target, this.time, this.smokeCuts) ? 2 : 0;
-				clearCount += Number(blocked[ray] === 0);
-				++ray;
-			}
-		}
-		this.caches[botIndex] = cache;
-		const originValues = new Float32Array(origins.length * 3);
-		origins.forEach((origin, index) => originValues.set([origin.x, origin.y, origin.z], index * 3));
-		return {origins: originValues, targets: new Float32Array(targetValues), blocked, clearCount, visible: clearCount > 0,
-			traversal: traversal ? this.map.finish_traversal(traversal) : null};
+		}, targetSet, {
+			captureTraversal,
+			deadline,
+			cache: this.caches[botIndex],
+			debug: this.debug,
+			held,
+			targetOrigin: bot.origin,
+			smokeActive: this.smokes.length !== 0,
+			smokeBlocked: (origin, target) => smoke_line_blocked(this.map, this.smokes, this.clearances,
+				origin, target, this.time, this.smokeCuts, this.heTuning)
+		});
+		this.caches[botIndex] = result.cache;
+		if (result.rawVisible) this.revealedUntil[botIndex] = this.time + this.visibilityHoldSeconds;
+		result.visible = result.rawVisible || this.time < this.revealedUntil[botIndex];
+		result.held = result.visible && !result.rawVisible;
+		delete result.cache;
+		return result;
 	}
 
 	step()
@@ -993,7 +1202,8 @@ export class FpsSimulation
 		this.move_grenades();
 		const captureTraversal = this.captureTraversal;
 		this.captureTraversal = false;
-		const visibilities = this.bots.map((bot, index) => this.visibility(bot, index, captureTraversal));
+		const deadline = (globalThis.performance?.now?.() ?? Date.now()) + 75;
+		const visibilities = this.bots.map((bot, index) => this.visibility(bot, index, captureTraversal, deadline));
 		const visibility = visibilities[0];
 		this.bot = this.bots[0];
 		return {
