@@ -139,17 +139,9 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 	capture_timing_ = {};
 	bone_timing_ = {};
 	transmit_timing_ = {};
-<<<<<<< HEAD
-<<<<<<< HEAD
 	never_opened_pairs_ = 0;
-=======
 	capsule_players_ = 0;
 	capsule_failed_players_ = 0;
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
-=======
-	capsule_players_ = 0;
-	capsule_failed_players_ = 0;
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 	if (clear_debug_records)
 	{
 		recent_hides_.clear();
@@ -270,17 +262,15 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			if (cache.group_valid)
 			{
 				update_pair_visual_group(guard, cache.group_key);
-<<<<<<< HEAD
 			}
-			// Past its warmup but still never seen fully open: hiding for this pair
-			// stays permanently disallowed until group_fully_marked succeeds once while
-			// visible. Counted here so cs2fow_status can surface it instead of this
-			// looking like filtering silently doing nothing.
-			if (guard.initialized && now >= guard.fail_open_until && !guard.baseline_opened)
+			// Never seen fully open: hiding for this pair stays permanently disallowed
+			// until group_fully_marked succeeds once while visible. pair_guard no longer
+			// carries its own warmup timer (that now lives only on lifecycle_guard), so
+			// this is a plain baseline check. Counted here so cs2fow_status can surface
+			// it instead of this looking like filtering silently doing nothing.
+			if (guard.initialized && !guard.baseline_opened)
 			{
 				++never_opened_pairs;
-=======
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 			}
 			if (result->visible[slot][target])
 			{

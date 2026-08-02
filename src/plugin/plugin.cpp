@@ -937,33 +937,17 @@ void plugin::print_metrics() const
 	runtime_timing_stats capture_timing;
 	runtime_timing_stats bone_timing;
 	runtime_timing_stats transmit_timing;
-<<<<<<< HEAD
-<<<<<<< HEAD
 	uint32_t never_opened_pairs;
-=======
 	uint32_t capsule_players = 0;
 	uint32_t capsule_failed_players = 0;
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
-=======
-	uint32_t capsule_players = 0;
-	uint32_t capsule_failed_players = 0;
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 	{
 		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 		capture_timing = capture_timing_;
 		bone_timing = bone_timing_;
 		transmit_timing = transmit_timing_;
-<<<<<<< HEAD
-<<<<<<< HEAD
 		never_opened_pairs = never_opened_pairs_;
-=======
 		capsule_players = capsule_players_;
 		capsule_failed_players = capsule_failed_players_;
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
-=======
-		capsule_players = capsule_players_;
-		capsule_failed_players = capsule_failed_players_;
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 	}
 	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->captured).count() : -1.0;
 	META_CONPRINTF("[CS2FOW] %s; map=%s crc=0x%08x version=%u triangles=%u nodes=%u packets=%u bytes=%llu depth=%u\n",
@@ -1001,13 +985,7 @@ void plugin::print_metrics() const
 	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_listener=%d he_active=%u\n",
 		settings::current().smoke_occlusion ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
 		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
-<<<<<<< HEAD
-<<<<<<< HEAD
-	META_CONPRINTF("[CS2FOW] teammate filtering=%d\n", cs2fow_filter_teammates.Get() ? 1 : 0);
-	META_CONPRINTF("[CS2FOW] pairs past warmup but never proven fully open (cannot hide)=%u\n", never_opened_pairs);
-=======
-=======
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
+	META_CONPRINTF("[CS2FOW] pairs never proven fully open (cannot hide)=%u\n", never_opened_pairs);
 	const bool ffa = teammates_are_enemies();
 	META_CONPRINTF("[CS2FOW] teammate filtering configured=%d ffa=%d effective=%d\n",
 		settings::current().filter_teammates ? 1 : 0, ffa ? 1 : 0,
@@ -1022,10 +1000,6 @@ void plugin::print_metrics() const
 		settings::current().debug_los_player,
 		compatibility_.debug_beam_available() ? 1 : 0,
 		debug_beams, los_debug_failed_ ? 1 : 0);
-<<<<<<< HEAD
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
-=======
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))

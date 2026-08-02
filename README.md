@@ -128,7 +128,7 @@ The worker gets a copy of the numbers, never live CS2 objects. In other words, i
 
 The plugin runs `cfg/cs2fow.cfg` when it loads and again before the background visibility worker starts for each map. Configuration is all-or-nothing: the previous known-good settings remain active until the final `cs2fow_config_loaded` line confirms that the whole file ran. An interrupted file, missing confirmation line, or five-second timeout restores the previous settings; an initial failure keeps the built-in defaults. Do not remove or move that final line.
 
-Use `cs2fow_status` as the short dashboard. It reports the health state, configuration, map, enabled protection, player count, number of viewer-to-target pairs being checked, the time taken by the slowest 1% of recent worker checks (p99), snapshot age, and one next action when intervention is needed. Use `cs2fow_metrics` for the complete performance and activity counters.
+Use `cs2fow_status` as the short dashboard. It reports the health state, configuration, map, enabled protection, player count, number of viewer-to-target pairs being checked, the time taken by the slowest 1% of recent worker checks (p99), snapshot age, one next action when intervention is needed, and how many player pairs have never been proven fully open and so still cannot be hidden. Use `cs2fow_metrics` for the complete performance and activity counters.
 
 ```text
 cs2fow_help           list administrator commands
@@ -279,109 +279,6 @@ It means CS2FOW would rather show too much than hide the wrong player. If someth
 
 </details>
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-## Quickstart
-
-1. Install [Metamod:Source](https://www.sourcemm.net/) on your CS2 server.
-2. Grab the Windows or Linux `0.2.2-preview` core ZIP from the [releases page](https://github.com/karola3vax/CS2FOW/releases).
-3. Extract it into your server's `game/csgo` folder. Do not rearrange the folders inside the ZIP.
-4. Start your server and load a map.
-5. Type `cs2fow_status` in the server console.
-
-The first time you load a map, `cs2fow_status` may say that an automatic bake is running. You can keep playing, and everyone stays visible until the bake finishes and passes its checks. The optional official-maps ZIP comes with ready-made data, so its included maps skip this first wait.
-
-Your server needs an x86-64 CPU with AVX visible to the operating system. CS2FOW also checks that its private engine offsets, called gamedata, match the loaded CS2 server file by size and CRC32. If Valve ships an unknown update, CS2FOW stays off until matching gamedata is installed. That is much safer than guessing inside server memory.
-
-## The protection boundary
-
-CS2FOW keeps its hands off as much of the game as possible. It hides only this small visual group:
-
-- the player pawn;
-- active, last, and carried weapons, including carried C4;
-- wearables;
-- a currently carried hostage prop.
-
-Everything that matters on its own stays on its own. A planted C4, dropped objective, dropped weapon, flying grenade, inferno, sound, or unknown entity does not disappear just because the player who once owned it is hidden. Your server still controls movement, collision, hit registration, damage, penetration, and game rules exactly as before.
-
-CS2FOW does not filter HLTV, spectators, dead players, or your own player. Teammates stay visible by default. If you set `cs2fow_filter_teammates 1`, living teammates use the same visibility check, which can also remove their client-side markers and radar information while hidden.
-
-Live smoke can block those imaginary sight lines too. By default, an HE opens a 100-unit viewing channel through affected smoke for 2.5 seconds, but only if the smoke was already there when the HE exploded. A wall still wins, and another overlapping smoke can still block the view.
-
-## How it works
-
-1. **Load the map:** CS2FOW finds the mounted VPK and the physics data inside it.
-2. **Bake the walls:** the baker turns thousands of collision triangles into a compact, quick-to-search map called a BVH8.
-3. **Take a picture:** on the game thread, CS2FOW safely copies each player's position, size, movement, view direction, ping, and held weapon. This recent picture is the snapshot.
-4. **Draw sight lines:** a background worker tests eight viewing points against the player's current and predicted body, box corners, and weapon muzzle.
-5. **Choose visible or hidden:** if even one line gets past both the baked walls and live smoke, the player stays visible.
-6. **Control the outgoing update:** `CheckTransmit`, the server's outgoing entity list, first marks the verified `dont_transmit` bit and then removes the matching primary send bit for each hidden visual entity.
-
-The worker gets a copy of the numbers, never live CS2 objects. In other words, it reads a photograph instead of reaching back into the moving game.
-
-### Baked map geometry
-
-<table>
-<tr>
-<td width="52%">
-<p>The baker strips a map's static collision down to the walls CS2FOW needs for sight checks. Before using the result, the plugin checks the BVH8 structure, the source file's fingerprint (CRC and size), and the report details.</p>
-<p>Your server can bake mounted maps automatically. You can also prepare public Workshop maps through the <a href="https://cs2fow-bake-service.onrender.com/">CS2FOW Map Baker</a>.</p>
-</td>
-<td width="48%" align="center">
-<img src="docs/scan_cbbl.png" width="100%" alt="Static cobblestone collision mesh used by CS2FOW">
-</td>
-</tr>
-</table>
-
-## Operating the server
-
-The plugin runs `cfg/cs2fow.cfg` when it loads and again whenever a map starts. Out of the box, wall and smoke filtering are on, teammate filtering is off, and Valve's `sv_enable_donttransmit 0` compatibility mode is used. CS2FOW's paired send-list handling also supports mode `1`.
-
-Think of `cs2fow_status` as the dashboard. It tells you whether CS2FOW is active, why it stepped aside, which map bake is loaded, how long its work takes, how fresh the latest snapshot is, how many player pairs it checked, what smoke and HE handling are doing, whether teammates are filtered, how an automatic bake is going, and how many player pairs are past warmup but have never been proven fully open and so still cannot be hidden.
-
-If you need to see exactly which entity bits CS2FOW removed:
-
-```text
-cs2fow_debug 1              start silent evidence collection
-cs2fow_entity               list buffered records, newest first
-cs2fow_entity <edict>       show records for one entity index
-cs2fow_entity clear         clear the evidence buffer
-```
-
-The debug buffer records only primary bits CS2FOW truly removed. Turning debug off stops collecting new evidence, but keeps what is already there until a reset or you clear it.
-
-<details>
-<summary><strong>Complete configuration reference</strong></summary>
-
-| Setting | Default | Meaning |
-| --- | ---: | --- |
-| `sv_enable_donttransmit` | `0` | Use Valve's safer compatibility mode. CS2FOW also handles mode `1` correctly. |
-| `cs2fow_enable` | `1` | Turn filtering on whenever all required data passes its safety checks. |
-| `cs2fow_smoke_occlusion` | `1` | Let live smoke block sight. If CS2FOW cannot safely read the smoke data, smoke steps aside while wall protection keeps working. |
-| `cs2fow_he_clear_radius_units` | `100` | Set how wide an HE-opened viewing channel is. Use `0` to turn HE clearing off. |
-| `cs2fow_he_clear_seconds` | `2.5` | Set how long an HE-opened viewing channel lasts. Use `0` to turn HE clearing off. |
-| `cs2fow_filter_teammates` | `0` | Give living teammates the same visibility checks as enemies. |
-| `cs2fow_update_interval_ms` | `1` | Wait at least this many milliseconds before sending another picture of the players to the worker. |
-| `cs2fow_base_lookahead_ms` | `75` | Start movement prediction this many milliseconds ahead before ping is added. |
-| `cs2fow_rtt_lookahead_scale` | `1.5` | Multiply the viewing player's round-trip ping by this amount when looking ahead. |
-| `cs2fow_max_lookahead_ms` | `375` | Never look farther ahead than this many milliseconds. Use `0` to turn movement prediction off. |
-| `cs2fow_max_prediction_units` | `96` | Never move either player's predicted position farther than this. Use `0` to turn movement prediction off. |
-| `cs2fow_shoulder_base_units` | `24` | Start the left and right viewing points this far from the player's eye. |
-| `cs2fow_shoulder_rtt_scale` | `0.64` | Add this many shoulder units for each millisecond of the viewing player's round-trip ping. |
-| `cs2fow_max_shoulder_units` | `128` | Never push the left and right viewing points farther out than this. |
-| `cs2fow_visibility_hold_ms` | `16` | Minimum time to keep a player visible after they become visible, to prevent flicker. The worker only re-checks this once per update cycle, so the actual hold can round up to the next `cs2fow_update_interval_ms` cycle rather than landing exactly on this value. |
-| `cs2fow_debug` | `0` | Save evidence about entity bits CS2FOW actually removed. It does not spam the console. |
-
-If you are keeping an older custom config, give it a quick update. Add `sv_enable_donttransmit 0` and both HE-clearance settings. Replace the old `50`/`150` lookahead defaults, add the RTT, prediction-distance, and shoulder settings, replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms`, and remove `cs2fow_peek_margin_units`.
-
-Automatic baking needs permission to write into `addons/cs2fow/data/maps`. On Linux, the packaged baker and VRF program also need to stay executable.
-
-</details>
-
-=======
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
-=======
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 ## Honest limits
 
 - Baked walls and live smoke can block sight. Doors, breakable objects, moving props, particles, projectiles, and other moving things cannot.

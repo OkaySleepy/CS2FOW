@@ -230,16 +230,8 @@ private:
 	std::array<los_debug_beam, k_visibility_debug_beam_count_max> los_debug_beams_;
 	bool los_debug_failed_ {};
 	uint64_t snapshot_sequence_ {};
-<<<<<<< HEAD
-<<<<<<< HEAD
-	bool prerequisites_valid_ {};
+	uint32_t active_worker_threads_ {};
 	uint32_t never_opened_pairs_ {};
-=======
-	uint32_t active_worker_threads_ {};
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
-=======
-	uint32_t active_worker_threads_ {};
->>>>>>> aca6e8f1e619750df9f1a0fb3979bdf6956950e8
 };
 
 extern plugin g_plugin;
