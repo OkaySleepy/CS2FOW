@@ -53,6 +53,7 @@ It explains the intent of the code. The engine and file-format details are still
 | `src/plugin/visibility_worker.*` | Own the background thread, replace pending work with the newest snapshot, evaluate capsule visibility, and publish results. |
 | `src/plugin/transmit.cpp` | Apply lifecycle rules and visibility results to the paired primary/`dont_transmit` lists; keep quarantine and debug evidence state. |
 | `src/plugin/automatic_baker.*` | Run and monitor the external baker without blocking the game thread. |
+| `src/plugin/updater.*` | Verify compatible GitHub release assets, stage complete platform packages off the game loop, and install them only during the next server start. |
 | `src/core/bvh8.cpp` | Traverse an in-memory BVH8 and answer whether a line segment hits a triangle. |
 | `src/core/bvh8_format.cpp` | Validate, read, verify, and safely replace BVH8 version 3 files. |
 | `src/core/builder.*` | Turn accepted triangles into BVH8 nodes and triangle packets. |
@@ -95,6 +96,17 @@ After registering ConVars during plugin load, and again before every map worker 
 7. While baking, or after any failure, `disabled_reason_` keeps transmit filtering off. A finished automatic bake is accepted only if the mounted source is still the same.
 
 This is why a Valve map update cannot silently reuse old wall geometry.
+
+## Automatic-update flow
+
+1. After the initial configuration settles, the updater checks GitHub's latest stable release after 30 seconds and every six hours. `cs2fow_auto_update 0` cancels an active HTTP request and prevents future checks.
+2. The release must be newer, non-draft, and non-prerelease, with exact platform-package and release-manifest asset names under the CS2FOW GitHub repository.
+3. Steam's server HTTP service requires verified TLS. GitHub's declared size and SHA-256 digest are checked for both assets.
+4. The manifest version and package SHA-256 must agree. Its Windows or Linux fingerprint list must contain the exact currently loaded `server.dll` or `libserver.so` size and CRC before the large package is downloaded.
+5. The package is unpacked on a background task with path, file-count, per-file, total-size, duplicate-entry, required-file, and SHA-256 checks. Only CS2FOW's known package paths are accepted.
+6. Staging copies the verified new plugin to `cs2fow-update`, writes a pending marker, and points CS2FOW's Metamod VDF at that bootstrap name. The running plugin remains unchanged.
+7. On the next full server start, that new bootstrap binary backs up the old stable binary, merges known values from the current config into the new commented template, updates gamedata, baker, VRF, documentation/licenses, and stable binary, restores Linux executable modes, and returns the VDF to `cs2fow`.
+8. Map bakes under `addons/cs2fow/data/maps` are never copied, deleted, or replaced. Any failed request, validation, or install step keeps protection fail-open where appropriate and retries without guessing.
 
 ## Game-state and worker flow
 
@@ -150,6 +162,7 @@ The primary `IsBitSet` check always runs because only set bits may enter the pai
 | Visibility worker | No | One taken snapshot, muzzle-ray caches, reveal holds, worker statistics, next result | `mutex_` protects pending work; `stats_mutex_` protects statistics; published result is shared immutably. |
 | CheckTransmit hook | Yes, only for validation/group resolution | Paired primary/`dont_transmit` bits and transmit lifecycle/quarantine/debug state | Holds `transmit_state_mutex_`; does no BVH traversal, file I/O, process work, or heap allocation. |
 | Automatic-baker thread | No live engine objects | External process and one completion record | Receives copied paths/map-source metadata; its own mutex protects status/completion. |
+| Automatic-update staging task | No live engine objects | One already downloaded package and ignored staging directory | Receives copied paths/version/digest; archive hashing and extraction stay off the game loop. |
 | Console commands | No direct player traversal | Read status or read/clear debug records | Debug commands use `transmit_state_mutex_`. |
 
 The BVH8 data is loaded before the worker starts and remains unchanged until that worker is stopped. That gives the worker a stable read-only map tree.
@@ -166,6 +179,7 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 - A map change, level shutdown, or normal plugin-state reset also clears debug evidence.
 - Worker start resets pending/published work, cached blocking packets, reveal holds, and timing/pair statistics.
 - Automatic-baker stop cancels/joins its task and terminates its full baker/VRF process tree before old map state is discarded.
+- Automatic updates never hot-swap the running binary, never accept a release for a different CS2 fingerprint, and never touch installed map bakes.
 
 ## Where to make common changes
 
@@ -183,6 +197,7 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 | Physics filtering/build recipe | `src/baker/glb_import.cpp`, `src/core/builder.cpp` | Recipe changes require an intentional format/recipe decision and new bakes. |
 | Operator settings/commands | `src/plugin/settings.*`, `cfg/cs2fow.cfg`, `README.md` | Preserve the `cs2fow_*` public names and keep the transaction marker last. |
 | Binary/schema/private API compatibility | `src/plugin/runtime_compatibility.*`, `gamedata/cs2fow.games.txt` | Preserve exact fingerprint enforcement and the required/optional capability boundary. |
+| Automatic-update validation or install ownership | `src/plugin/updater.*`, release manifest, and `package.py` | Keep exact platform assets, SHA-256 checks, restart-only install, config backups, and map-bake preservation. |
 
 ## Build, test, package, and release
 
@@ -208,6 +223,6 @@ bash scripts/build-linux.sh
 
 Each build script fetches exact dependencies, configures and compiles, runs native and SDK-independent tests, verifies Windows imports or SteamRT3 symbol versions, and produces the corresponding ignored `packages/` ZIP. `scripts/check_studio.py` runs runtime alignment, BVH8, movement, smoke, HE, and malformed-input checks.
 
-`package.py` takes the version from top-level `VERSION`. For official maps it asks `cs2fow_baker --inspect-bvh8` to validate every bake and requires matching report metadata. It also checks licenses, duplicate/unsafe ZIP entries, ZIP integrity, Linux modes, and checksums.
+`package.py` takes the version from top-level `VERSION`. For official maps it asks `cs2fow_baker --inspect-bvh8` to validate every bake and requires matching report metadata. It also checks licenses, duplicate/unsafe ZIP entries, ZIP integrity, Linux modes, and checksums. Every stable release intended for automatic updates must attach both platform ZIPs and the matching `v<version>-manifest.json`; the updater rejects anything incomplete or incompatible.
 
 Creating a tag, release manifest, release notes, public release, or Bake Service deployment remains a separate explicitly approved task.

@@ -53,6 +53,9 @@ CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE,
 CConVar<int> cs2fow_debug_los_player("cs2fow_debug_los_player", FCVAR_NONE,
 	"Temporarily draw one 1-based player's live capsule axes, muzzle, and AABB corners; 0 removes them",
 	0, true, 0, true, static_cast<int>(k_max_players), on_convar_changed<int>);
+CConVar<bool> cs2fow_auto_update("cs2fow_auto_update", FCVAR_NONE,
+	"Automatically download verified compatible stable updates", true,
+	on_convar_changed<bool>);
 
 namespace
 {
@@ -84,7 +87,8 @@ void on_configuration_changed()
 		cs2fow_max_shoulder_units.Get(),
 		cs2fow_visibility_hold_ms.Get(),
 		cs2fow_debug.Get(),
-		cs2fow_debug_los_player.Get()
+		cs2fow_debug_los_player.Get(),
+		cs2fow_auto_update.Get()
 	});
 	if (changes != setting_change_none && config_change_callback != nullptr)
 	{
@@ -117,7 +121,8 @@ runtime_configuration read_convars()
 		cs2fow_max_shoulder_units.Get(),
 		cs2fow_visibility_hold_ms.Get(),
 		cs2fow_debug.Get(),
-		cs2fow_debug_los_player.Get()
+		cs2fow_debug_los_player.Get(),
+		cs2fow_auto_update.Get()
 	};
 }
 
@@ -137,6 +142,7 @@ void write_convars(const runtime_configuration &value)
 	cs2fow_visibility_hold_ms.Set(value.visibility_hold_ms);
 	cs2fow_debug.Set(value.debug);
 	cs2fow_debug_los_player.Set(value.debug_los_player);
+	cs2fow_auto_update.Set(value.automatic_updates);
 	restoring_configuration = false;
 }
 

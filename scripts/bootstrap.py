@@ -45,7 +45,8 @@ def checkout(name: str, spec: dict[str, str]) -> Path:
     capture_output=True, text=True
   )
   if probe.returncode != 0 and "dubious ownership" in probe.stderr:
-    run("git", "config", "--global", "--add", "safe.directory", str(target))
+    run("git", "config", "--global", "--add", "safe.directory", str(target),
+        cwd=Path(tempfile.gettempdir()))
   remote = subprocess.run(
     ["git", "-C", str(target), "remote", "get-url", "origin"],
     capture_output=True,

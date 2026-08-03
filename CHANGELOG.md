@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.5
+
+- Added verified automatic updates, enabled by default with `cs2fow_auto_update 1`. CS2FOW checks GitHub's stable releases, requires an exact Windows/Linux package and release manifest, verifies both SHA-256 digests and the current CS2 server-binary fingerprint, and stages the complete platform package outside the game loop.
+- Install prepared updates only on the next full server restart through a separate bootstrap binary. Preserve known configuration values and all map bakes, keep backups of the previous configuration and plugin binary, restore Linux tool permissions, and leave the current installation running when any check or filesystem operation fails.
+
 ## 0.3.4
 
 - Ship `mp_playerid 1` by default so CS2 does not display an enemy name over that player's stale last-transmitted position while CS2FOW is hiding them.
