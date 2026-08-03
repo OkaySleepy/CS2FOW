@@ -172,7 +172,7 @@ The debug buffer is a small history kept in server memory. It records only game 
 | `cs2fow_debug` | `0` | Save evidence about game objects CS2FOW actually removed from outgoing updates. It does not spam the console. |
 | `cs2fow_debug_los_player` | `0` | Temporarily draw one player's line-of-sight (LOS) checks: rounded body capsules, weapon muzzle, and rectangular AABB corners. Player slots are numbered from `1`. Keep `0` during normal play. |
 
-If you are keeping an older custom config, copy the commented `0.3.3` file and reapply your values. The internal `cs2fow_config_loaded` command must be the last command or CS2FOW will reject and roll back the file.
+If you are keeping an older custom config, copy the commented `0.3.4` file and reapply your values. The internal `cs2fow_config_loaded` command must be the last command or CS2FOW will reject and roll back the file.
 
 Automatic baking needs permission to write into `addons/cs2fow/data/maps`. On Linux, the packaged baker and ValveResourceFormat (VRF), the tool that reads map files, must also remain executable.
 

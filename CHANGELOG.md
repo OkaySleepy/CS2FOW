@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Ship `mp_playerid 1` by default so CS2 does not display an enemy name over that player's stale last-transmitted position while CS2FOW is hiding them.
+- Report whether target IDs are safe in `cs2fow_status`, and make `cs2fow_check_config` explain how to correct an unrestricted `mp_playerid` setting.
+- Keep visibility decisions, transmitted entity groups, gunshot behavior, performance settings, strict CS2 compatibility checks, and fail-open behavior unchanged from 0.3.3.
+
 ## 0.3.3
 
 - Revalidated every private Windows and Linux gamedata value against the current public CS2 `1.41.7.3` binaries. The strict gate now accepts both exact verified Linux files Valve distributed for that build, whose required functions and layouts are identical, while continuing to reject every unknown fingerprint.
