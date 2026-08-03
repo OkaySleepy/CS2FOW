@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
-$manifest = Get-Content (Join-Path $repo "build-dependencies.json") -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath (Join-Path $repo "build-dependencies.json") -Raw | ConvertFrom-Json
 
 if ($null -ne (Get-Command docker.exe -ErrorAction SilentlyContinue)) {
     $mount = $repo.Replace("\", "/")
