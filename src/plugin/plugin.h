@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "transmit_debug.h"
 #include "transmit_masks.h"
+#include "updater.h"
 #include "visibility_worker.h"
 
 #include <ISmmPlugin.h>
@@ -201,6 +202,7 @@ private:
 	IGameEventManager2 *game_events_ {};
 	game_resource_service *game_resource_ {};
 	runtime_compatibility compatibility_;
+	updater_service updater_;
 	int game_frame_hook_id_ {};
 	int check_transmit_hook_id_ {};
 	int game_event_load_hook_id_ {};

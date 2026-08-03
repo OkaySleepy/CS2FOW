@@ -111,6 +111,7 @@ SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, false, int, c
 bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
 	PLUGIN_SAVEVARS();
+	updater_service::apply_pending_update();
 	api_ = ismm;
 	GET_V_IFACE_CURRENT(GetEngineFactory, engine_, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
 	GET_V_IFACE_CURRENT(GetEngineFactory, cvar_, ICvar, CVAR_INTERFACE_VERSION);
@@ -152,6 +153,7 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 
 	compatibility_.initialize(ismm->GetBaseDir(), game_entities_, schema,
 		game_events_ != nullptr);
+	updater_.start(compatibility_.detected_server_binary_fingerprint());
 	if (compatibility_.valid()
 		&& compatibility_.game_event_manager_vtable() != nullptr)
 	{
@@ -189,6 +191,7 @@ bool plugin::Unload(char *error, size_t max_length)
 	game_event_load_hook_id_ = 0;
 	automatic_baker_.stop();
 	worker_.stop();
+	updater_.unload();
 	destroy_los_debug_beams();
 	if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
 	if (check_transmit_hook_id_ != 0) SH_REMOVE_HOOK_ID(check_transmit_hook_id_);
@@ -634,6 +637,7 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	{
 		finish_config_load(false);
 	}
+	updater_.on_game_frame();
 	if (!he_event_available_ && game_events_ != nullptr)
 	{
 		he_event_available_ = game_events_->AddListener(this, "hegrenade_detonate", true);
@@ -895,8 +899,9 @@ void plugin::print_status() const
 	const char *configuration_state = settings::loading() ? "loading"
 		: settings::load_state() == configuration_load_state::failed ? "previous settings restored after a failed load"
 		: settings::load_state() == configuration_load_state::loaded ? "loaded" : "compiled defaults";
-	META_CONPRINTF("[CS2FOW] Configuration: %s; worker threads configured=%d active=%u\n",
-		configuration_state, configuration.worker_threads, active_worker_threads_);
+	META_CONPRINTF("[CS2FOW] Configuration: %s; worker threads configured=%d active=%u; automatic updates=%s\n",
+		configuration_state, configuration.worker_threads, active_worker_threads_,
+		configuration.automatic_updates ? "on" : "off");
 	META_CONPRINTF("[CS2FOW] Map: %s%s%s\n",
 		pending_map_.empty() ? (map_.empty() ? "<none>" : map_.c_str()) : pending_map_.c_str(),
 		disabled_reason_.empty() ? "" : "; ",
@@ -994,6 +999,8 @@ void plugin::print_metrics() const
 	const bool playerid_readable = settings::playerid_mode(playerid);
 	META_CONPRINTF("[CS2FOW] mp_playerid readable=%d value=%d\n",
 		playerid_readable ? 1 : 0, playerid);
+	META_CONPRINTF("[CS2FOW] automatic updates=%d source=GitHub stable releases install=next restart\n",
+		settings::current().automatic_updates ? 1 : 0);
 	const uint32_t debug_beams = static_cast<uint32_t>(std::count_if(los_debug_beams_.begin(), los_debug_beams_.end(),
 		[](const los_debug_beam &beam) { return beam.handle.IsValid(); }));
 	META_CONPRINTF("[CS2FOW] temporary LOS debug player=%d available=%d beams=%u failed=%d\n",

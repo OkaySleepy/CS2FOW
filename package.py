@@ -36,7 +36,11 @@ VRF_LICENSE_NAMES = (
   "ValvePak.LICENSE", "ValveResourceFormat.LICENSE", "Vortice.LICENSE",
   "zlib.LICENSE", "zstd.LICENSE", "ZstdSharp.LICENSE",
 )
-LICENSE_FILES = {ROOT / "third_party" / "cgltf.LICENSE": "cgltf.LICENSE"} | {
+LICENSE_FILES = {
+  ROOT / "third_party" / "cgltf.LICENSE": "cgltf.LICENSE",
+  ROOT / "third_party" / "miniz.LICENSE": "miniz.LICENSE",
+  ROOT / "third_party" / "picosha2.LICENSE": "picosha2.LICENSE",
+} | {
   ROOT / "third_party" / "vrf_licenses" / name: name for name in VRF_LICENSE_NAMES
 }
 VRF_FILES = {

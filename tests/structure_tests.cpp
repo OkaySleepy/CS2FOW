@@ -3,6 +3,7 @@
 #include "runtime_compatibility_model.h"
 #include "runtime_health.h"
 #include "settings_model.h"
+#include "updater_model.h"
 
 #include <array>
 #include <cassert>
@@ -47,6 +48,10 @@ void run_structure_tests()
 	direct.debug = true;
 	assert(transaction.apply_direct(direct) == setting_change_debug);
 	assert(transaction.active() == direct);
+	runtime_configuration updates_disabled = direct;
+	updates_disabled.automatic_updates = false;
+	assert(transaction.apply_direct(updates_disabled) == setting_change_none);
+	assert(!transaction.active().automatic_updates);
 
 	runtime_configuration invalid;
 	invalid.enable = false;
@@ -94,4 +99,27 @@ void run_structure_tests()
 	assert(std::string(runtime_health_state_name(runtime_health_state::update_required)) == "UPDATE REQUIRED");
 	assert(std::string(runtime_health_state_name(runtime_health_state::unsupported_system)) == "UNSUPPORTED SYSTEM");
 	assert(std::string(runtime_health_state_name(runtime_health_state::error)) == "ERROR");
+
+	semantic_version current;
+	semantic_version available;
+	assert(parse_semantic_version("0.3.5", current));
+	assert(parse_semantic_version("v0.3.6", available));
+	assert(compare_semantic_versions(current, available) < 0);
+	assert(!parse_semantic_version("0.3.5-preview", available));
+	assert(!safe_update_version("../0.3.5"));
+	assert(valid_sha256_digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+	assert(!valid_sha256_digest("sha256:not-a-digest"));
+	uint32_t crc {};
+	assert(parse_crc32("0xa440c490", crc) && crc == 0xa440c490u);
+	assert(!parse_crc32("a440c490", crc));
+	assert(update_setting_name("  cs2fow_auto_update 0") == "cs2fow_auto_update");
+	assert(update_setting_name("sv_enable_donttransmit 1") == "sv_enable_donttransmit");
+	assert(update_setting_name("mp_playerid 1") == "mp_playerid");
+	assert(update_setting_name("hostname test").empty());
+	assert(safe_update_archive_path("addons/cs2fow/bin/cs2fow.dll"));
+	assert(safe_update_archive_path("addons/metamod/cs2fow.vdf"));
+	assert(safe_update_archive_path("tools/vrf/win64/Source2Viewer-CLI.exe"));
+	assert(!safe_update_archive_path("../server.dll"));
+	assert(!safe_update_archive_path("addons/other/plugin.dll"));
+	assert(!safe_update_archive_path("C:/server.dll"));
 }

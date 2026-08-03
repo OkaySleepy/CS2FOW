@@ -21,6 +21,7 @@ struct runtime_configuration
 	int visibility_hold_ms {1000};
 	bool debug {};
 	int debug_los_player {};
+	bool automatic_updates {true};
 
 	bool operator==(const runtime_configuration &) const = default;
 };

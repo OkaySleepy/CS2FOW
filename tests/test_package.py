@@ -89,6 +89,8 @@ class PackageTests(unittest.TestCase):
 
     def test_core_packages_require_every_license_source(self):
         self.assertIn("cgltf.LICENSE", package.LICENSE_FILES.values())
+        self.assertIn("miniz.LICENSE", package.LICENSE_FILES.values())
+        self.assertIn("picosha2.LICENSE", package.LICENSE_FILES.values())
         self.assertTrue(all(path.is_file() for path in package.LICENSE_FILES))
         self.assertEqual(len(package.VRF_FILES["win64"]), 5)
         self.assertEqual(len(package.VRF_FILES["linux64"]), 4)
@@ -124,6 +126,7 @@ class PackageTests(unittest.TestCase):
         ]
         self.assertEqual(lines[-1], "cs2fow_config_loaded")
         self.assertEqual(lines.count("cs2fow_config_loaded"), 1)
+        self.assertIn("cs2fow_auto_update 1", lines)
 
 
 if __name__ == "__main__":

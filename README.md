@@ -73,7 +73,7 @@ Every map gets a lightweight 3D copy of its solid walls. CS2FOW uses that copy t
 You need a Windows x64 or Linux x64 CS2 dedicated server running [Metamod:Source](https://www.sourcemm.net/) 2.x, the plugin loader that lets CS2 load server extensions. Your CPU must support AVX, a common instruction set CS2FOW uses for fast geometry calculations.
 
 1. Open this repository's **Releases** tab and choose the matching Windows or Linux package.
-2. Extract it into the server root, the top-level CS2 server folder, without rearranging anything. The package begins with the `game` folder.
+2. Extract it directly into the server's `game/csgo` folder without rearranging anything. The package begins with the `addons`, `cfg`, and `tools` folders.
 3. Start the server and load a map.
 4. Run `meta list`, then `cs2fow_status`.
 
@@ -82,6 +82,8 @@ That is it. Players install nothing.
 The first time you load a map, `cs2fow_status` may say that an automatic bake is running. A bake is the one-time step that turns the map's solid walls into fast visibility data. Everyone stays visible until it finishes and passes its checks. The optional official-maps ZIP includes ready-made data, so those maps skip this first wait.
 
 CS2FOW uses a compatibility file called gamedata to locate the exact parts of the CS2 server program it needs. Before using it, the plugin confirms the program by file size and CRC32, a checksum that acts like a digital fingerprint. If Valve ships an unknown update, CS2FOW stays off until matching gamedata is installed rather than guessing inside server memory.
+
+CS2FOW checks GitHub's stable releases for updates after startup and every six hours. It downloads only the package for the server's operating system, verifies GitHub's SHA-256 checksum and CS2FOW's release manifest, and refuses packages that do not explicitly support the server's current binary fingerprint. A verified update is prepared in the background and installed on the next full server restart; the running installation is never hot-swapped. Set `cs2fow_auto_update 0` and run `cs2fow_reload` to disable future checks. An update prepared before this was disabled may still install on the next restart.
 
 ## The protection boundary
 
@@ -138,7 +140,7 @@ cs2fow_reload         safely reload all settings or keep the previous ones
 cs2fow_check_config   explain settings that deserve attention
 ```
 
-Direct console changes still work immediately. A successful reload applies changes that are safe while a map is running; `cs2fow_worker_threads` starts on the next map, and status shows both the configured and currently running worker counts until then. Out of the box, wall and smoke filtering are on and teammate filtering is off. Valve's `sv_enable_donttransmit` setting controls how CS2 marks network entities that should not be sent; CS2FOW uses the safer compatibility mode `0` by default and also supports mode `1`.
+Direct console changes still work immediately. A successful reload applies changes that are safe while a map is running; `cs2fow_worker_threads` starts on the next map, and status shows both the configured and currently running worker counts until then. Out of the box, wall and smoke filtering and automatic updates are on, while teammate filtering is off. Valve's `sv_enable_donttransmit` setting controls how CS2 marks network entities that should not be sent; CS2FOW uses the safer compatibility mode `0` by default and also supports mode `1`.
 
 If you need to see exactly which game objects CS2FOW removed from outgoing network updates:
 
@@ -158,6 +160,7 @@ The debug buffer is a small history kept in server memory. It records only game 
 | --- | ---: | --- |
 | `sv_enable_donttransmit` | `0` | Choose how CS2 marks network entities that should not be sent. CS2FOW supports both modes and defaults to the safer compatibility mode. |
 | `mp_playerid` | `1` | Show target IDs for teammates only, preventing enemy names from appearing over a hidden player's stale client position. |
+| `cs2fow_auto_update` | `1` | Download verified compatible stable updates from GitHub Releases and install them on the next full server restart. |
 | `cs2fow_enable` | `1` | Turn filtering on whenever all required data passes its safety checks. |
 | `cs2fow_smoke_occlusion` | `1` | Let live smoke block sight. If CS2FOW cannot safely read the smoke data, smoke steps aside while wall protection keeps working. |
 | `cs2fow_he_clear_radius_units` | `100` | Set how wide an HE-opened viewing channel is. Use `0` to turn HE clearing off. |
@@ -172,7 +175,7 @@ The debug buffer is a small history kept in server memory. It records only game 
 | `cs2fow_debug` | `0` | Save evidence about game objects CS2FOW actually removed from outgoing updates. It does not spam the console. |
 | `cs2fow_debug_los_player` | `0` | Temporarily draw one player's line-of-sight (LOS) checks: rounded body capsules, weapon muzzle, and rectangular AABB corners. Player slots are numbered from `1`. Keep `0` during normal play. |
 
-If you are keeping an older custom config, copy the commented `0.3.4` file and reapply your values. The internal `cs2fow_config_loaded` command must be the last command or CS2FOW will reject and roll back the file.
+If you are keeping an older custom config, copy the commented `0.3.5` file and reapply your values. The internal `cs2fow_config_loaded` command must be the last command or CS2FOW will reject and roll back the file. Automatic updates merge known settings into the new commented layout and keep one pre-update configuration backup.
 
 Automatic baking needs permission to write into `addons/cs2fow/data/maps`. On Linux, the packaged baker and ValveResourceFormat (VRF), the tool that reads map files, must also remain executable.
 

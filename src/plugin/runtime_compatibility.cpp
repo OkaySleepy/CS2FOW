@@ -362,6 +362,12 @@ bool runtime_compatibility::verify_server_binary(
 			+ "; " + expected.str() + ", actual unavailable";
 		return false;
 	}
+	if (actual_size <= UINT32_MAX)
+	{
+		detected_server_binary_fingerprint_ = {
+			static_cast<uint32_t>(actual_size), actual_crc
+		};
+	}
 	if (!matches_server_binary_fingerprint(
 		server_binary_fingerprints_, actual_size, actual_crc))
 	{
