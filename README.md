@@ -168,7 +168,7 @@ The debug buffer is a small history kept in server memory. It records only game 
 | `cs2fow_shoulder_base_units` | `48` | Start the left/right shoulder and movement-intention points this far from the player's eye. |
 | `cs2fow_shoulder_rtt_scale` | `0.4` | Add this many units per millisecond of round-trip time (RTT), commonly called ping, updated in 25 ms steps. |
 | `cs2fow_max_shoulder_units` | `128` | Never push those network-delay-adjusted viewing points farther out than this. |
-| `cs2fow_visibility_hold_ms` | `1000` | Once a player becomes visible, keep them visible for about one second to cover brief line-of-sight gaps and prevent flicker. |
+| `cs2fow_visibility_hold_ms` | `1000` | Minimum time to keep a player visible after they become visible, about one second by default, to cover brief line-of-sight gaps and prevent flicker. Each pair is only re-checked once per submitted snapshot, so the actual hold can round up by roughly one `cs2fow_update_interval_ms` cycle rather than landing exactly on this value. |
 | `cs2fow_debug` | `0` | Save evidence about game objects CS2FOW actually removed from outgoing updates. It does not spam the console. |
 | `cs2fow_debug_los_player` | `0` | Temporarily draw one player's line-of-sight (LOS) checks: rounded body capsules, weapon muzzle, and rectangular AABB corners. Player slots are numbered from `1`. Keep `0` during normal play. |
 
